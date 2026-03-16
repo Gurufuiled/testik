@@ -47,6 +47,7 @@ export default function App() {
           </VoicePlayerProvider>
         </WebSocketProvider>
       </AuthProvider>
+      </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }

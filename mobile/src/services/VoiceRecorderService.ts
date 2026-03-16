@@ -1,0 +1,109 @@
+/**
+ * VoiceRecorderService - Records voice messages using expo-av.
+ * Outputs AAC .m4a format with waveform metering for UI.
+ */
+
+import { Audio } from 'expo-av';
+import { Platform } from 'react-native';
+
+import { dbToNormalized } from './waveformUtils';
+
+const WAVEFORM_SAMPLE_COUNT = 50;
+const PROGRESS_INTERVAL_MS = 100;
+
+export interface VoiceRecordingResult {
+  uri: string;
+  durationMs: number;
+  waveform: number[];
+}
+
+export { dbToNormalized } from './waveformUtils';
+
+class VoiceRecorderServiceClass {
+  private recording: InstanceType<typeof Audio.Recording> | null = null;
+  private waveformSamples: number[] = [];
+
+  /** Request RECORD_AUDIO (Android) / microphone (iOS) permission. Returns true if granted. */
+  async requestPermissions(): Promise<boolean> {
+    const { status } = await Audio.requestPermissionsAsync();
+    return status === 'granted';
+  }
+
+  /** Ensure audio mode allows recording (required on iOS). */
+  private async ensureAudioMode(): Promise<void> {
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: true,
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: false,
+      shouldDuckAndroid: true,
+      playThroughEarpieceAndroid: false,
+    });
+  }
+
+  /** Start recording. Call stopRecording() to finish and get result. */
+  async startRecording(): Promise<void> {
+    if (this.recording) {
+      throw new Error('Recording already in progress. Call stopRecording() first.');
+    }
+
+    const granted = await this.requestPermissions();
+    if (!granted) {
+      throw new Error(
+        Platform.OS === 'android'
+          ? 'RECORD_AUDIO permission denied'
+          : 'Microphone permission denied'
+      );
+    }
+
+    await this.ensureAudioMode();
+    this.waveformSamples = [];
+
+    const options = {
+      ...Audio.RecordingOptionsPresets.HIGH_QUALITY,
+      isMeteringEnabled: true,
+    };
+
+    const onStatusUpdate = (status: { metering?: number }): void => {
+      if (status.metering != null && this.waveformSamples.length < WAVEFORM_SAMPLE_COUNT) {
+        this.waveformSamples.push(dbToNormalized(status.metering));
+      }
+    };
+
+    const { recording } = await Audio.Recording.createAsync(
+      options,
+      onStatusUpdate,
+      PROGRESS_INTERVAL_MS
+    );
+
+    this.recording = recording;
+  }
+
+  /** Stop recording and return { uri, durationMs, waveform }. */
+  async stopRecording(): Promise<VoiceRecordingResult> {
+    const rec = this.recording;
+    if (!rec) {
+      throw new Error('No active recording. Call startRecording() first.');
+    }
+
+    const status = await rec.stopAndUnloadAsync();
+    this.recording = null;
+    const uri = rec.getURI();
+
+    if (!uri) {
+      throw new Error('Recording produced no file URI');
+    }
+
+    return {
+      uri,
+      durationMs: status.durationMillis ?? 0,
+      waveform: this.waveformSamples,
+    };
+  }
+
+  /** Check if currently recording. */
+  isRecording(): boolean {
+    return this.recording != null;
+  }
+}
+
+export const VoiceRecorderService = new VoiceRecorderServiceClass();

@@ -1,0 +1,367 @@
+/**
+ * SyncService - processes sync queue and performs full sync on WebSocket connect.
+ * Runs processSyncQueue (retry queued actions) then fullSync (fetch chats + messages).
+ */
+
+import { SyncQueueDao } from '../db';
+import { WebSocketService } from './WebSocketService';
+import { apiGet, apiUpload } from './apiClient';
+import { API_BASE_URL } from '../config';
+import { chatStore } from '../stores/chatStore';
+import { messageStore } from '../stores/messageStore';
+import type { Chat, Message } from '../stores/types';
+
+const MAX_RETRIES = 5;
+
+function getUploadBaseUrl(): string {
+  return API_BASE_URL.replace(/\/api\/?$/, '') || API_BASE_URL;
+}
+
+/** Returns url as-is if absolute (http/https), else baseUrl + url. */
+function toFullUrl(baseUrl: string, url: string): string {
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  return `${baseUrl}${url.startsWith('/') ? '' : '/'}${url}`;
+}
+
+/** API chat response (snake_case from server). */
+interface ApiChat {
+  id: string;
+  chat_type: string;
+  name: string | null;
+  avatar_url: string | null;
+  created_by_id: string;
+  last_message_id: string | null;
+  last_message_at: number | null;
+  last_message_preview: string | null;
+  unread_count: number;
+  is_muted: boolean;
+  is_pinned: boolean;
+  is_archived: boolean;
+  draft: string | null;
+  created_at: number;
+  updated_at: number;
+  members?: { user_id: string }[];
+}
+
+function mapApiChatToChat(api: ApiChat): Chat {
+  return {
+    id: api.id,
+    chat_type: api.chat_type as 'private' | 'group',
+    name: api.name,
+    avatar_url: api.avatar_url,
+    created_by: api.created_by_id,
+    last_message_id: api.last_message_id,
+    last_message_at: api.last_message_at,
+    last_message_preview: api.last_message_preview,
+    unread_count: api.unread_count,
+    is_muted: api.is_muted ? 1 : 0,
+    is_pinned: api.is_pinned ? 1 : 0,
+    is_archived: api.is_archived ? 1 : 0,
+    draft: api.draft,
+    created_at: api.created_at,
+    updated_at: api.updated_at,
+    members: api.members,
+  };
+}
+
+/** API message response (snake_case from server). */
+interface ApiMessage {
+  id: string;
+  chat_id: string;
+  sender_id: string;
+  msg_type: string;
+  content: string | null;
+  reply_to_id?: string | null;
+  is_edited?: number;
+  is_deleted?: number;
+  status: string;
+  transport?: string;
+  server_id?: string | null;
+  created_at: number | string;
+  updated_at?: number | string;
+  media?: {
+    remote_url?: string;
+    duration_ms?: number;
+    thumbnail_url?: string;
+    thumbnail_path?: string;
+    is_round?: boolean;
+    is_viewed?: boolean;
+    width?: number;
+    height?: number;
+    file_name?: string;
+    file_size?: number;
+  }[];
+}
+
+function mapApiMessageToMessage(api: ApiMessage): Message {
+  const createdAt =
+    typeof api.created_at === 'string'
+      ? new Date(api.created_at).getTime()
+      : api.created_at;
+  const updatedAt =
+    api.updated_at != null
+      ? typeof api.updated_at === 'string'
+        ? new Date(api.updated_at).getTime()
+        : api.updated_at
+      : createdAt;
+
+  const media =
+    api.media?.map((m) => ({
+      duration_ms: m.duration_ms ?? 0,
+      thumbnail_url: m.thumbnail_url,
+      thumbnail_path: m.thumbnail_path,
+      is_round: m.is_round,
+      is_viewed: m.is_viewed,
+      width: m.width,
+      height: m.height,
+      file_name: m.file_name,
+      file_size: m.file_size,
+      remote_url: m.remote_url,
+    })) ?? undefined;
+
+  return {
+    id: api.id,
+    chat_id: api.chat_id,
+    sender_id: api.sender_id,
+    msg_type: api.msg_type,
+    content: api.content,
+    reply_to_id: api.reply_to_id ?? null,
+    is_edited: api.is_edited ?? 0,
+    is_deleted: api.is_deleted ?? 0,
+    status: api.status,
+    transport: api.transport ?? 'ws',
+    server_id: api.server_id ?? null,
+    created_at: createdAt,
+    updated_at: updatedAt,
+    media,
+  };
+}
+
+type PayloadText = { chatId: string; content: string; msgType: string; tempId: string };
+type PayloadVoice = { chatId: string; uri: string; durationMs: number; waveform?: number[]; tempId: string };
+type PayloadVideoNote = { chatId: string; uri: string; durationMs: number; thumbnailUri?: string; tempId: string };
+type PayloadImage = { chatId: string; uri: string; width?: number; height?: number; fileName?: string; mimeType?: string; tempId: string };
+type PayloadFile = { chatId: string; uri: string; name: string; size: number; mimeType?: string; tempId: string };
+
+async function executeAction(action: string, payload: unknown): Promise<void> {
+  const baseUrl = getUploadBaseUrl();
+
+  switch (action) {
+    case 'send_message_text': {
+      const p = payload as PayloadText;
+      WebSocketService.send({
+        type: 'send_message',
+        chat_id: p.chatId,
+        content: p.content,
+        msg_type: p.msgType ?? 'text',
+      });
+      return;
+    }
+
+    case 'send_message_voice': {
+      const p = payload as PayloadVoice;
+      const result = await apiUpload({
+        uri: p.uri,
+        name: 'voice.m4a',
+        type: 'audio/mp4',
+      });
+      const fullUrl = toFullUrl(baseUrl, result.url);
+      WebSocketService.send({
+        type: 'send_message',
+        chat_id: p.chatId,
+        content: fullUrl,
+        msg_type: 'voice',
+        media: {
+          url: fullUrl,
+          duration_ms: p.durationMs,
+          waveform: p.waveform,
+        },
+      });
+      return;
+    }
+
+    case 'send_message_video_note': {
+      const p = payload as PayloadVideoNote;
+      const result = await apiUpload({
+        uri: p.uri,
+        name: 'video_note.mp4',
+        type: 'video/mp4',
+      });
+      const fullUrl = toFullUrl(baseUrl, result.url);
+
+      let thumbnailUrl: string | undefined;
+      if (p.thumbnailUri) {
+        const thumbResult = await apiUpload({
+          uri: p.thumbnailUri,
+          name: 'thumb.jpg',
+          type: 'image/jpeg',
+        });
+        thumbnailUrl = toFullUrl(baseUrl, thumbResult.url);
+      }
+
+      WebSocketService.send({
+        type: 'send_message',
+        chat_id: p.chatId,
+        content: fullUrl,
+        msg_type: 'video_note',
+        media: {
+          url: fullUrl,
+          duration_ms: p.durationMs,
+          thumbnail_url: thumbnailUrl,
+          is_round: true,
+        },
+      });
+      return;
+    }
+
+    case 'send_message_image': {
+      const p = payload as PayloadImage;
+      const imageMime = p.mimeType ?? ((p.fileName?.toLowerCase() ?? '').endsWith('.png') ? 'image/png' : 'image/jpeg');
+      const imageName = p.fileName ?? (imageMime === 'image/png' ? 'image.png' : 'image.jpg');
+      const result = await apiUpload({
+        uri: p.uri,
+        name: imageName,
+        type: imageMime,
+      });
+      const fullUrl = toFullUrl(baseUrl, result.url);
+      WebSocketService.send({
+        type: 'send_message',
+        chat_id: p.chatId,
+        content: fullUrl,
+        msg_type: 'image',
+        media: {
+          url: fullUrl,
+          width: p.width,
+          height: p.height,
+        },
+      });
+      return;
+    }
+
+    case 'send_message_file': {
+      const p = payload as PayloadFile;
+      const result = await apiUpload({
+        uri: p.uri,
+        name: p.name,
+        type: p.mimeType ?? 'application/octet-stream',
+      });
+      const fullUrl = toFullUrl(baseUrl, result.url);
+      WebSocketService.send({
+        type: 'send_message',
+        chat_id: p.chatId,
+        content: fullUrl,
+        msg_type: 'file',
+        media: {
+          url: fullUrl,
+          file_name: result.file_name,
+          file_size: result.file_size,
+          mime_type: result.mime_type,
+        },
+      });
+      return;
+    }
+
+    default:
+      throw new Error(`Unknown sync action: ${action}`);
+  }
+}
+
+class SyncServiceClass {
+  private dao = new SyncQueueDao();
+  private processing = false;
+
+  /**
+   * Process sync queue: get ready items, execute each action via WebSocket.
+   * On success: delete. On failure: scheduleRetry or markFailed (max 5 retries).
+   */
+  async processSyncQueue(): Promise<void> {
+    if (!WebSocketService.isConnected()) return;
+    if (this.processing) return;
+
+    this.processing = true;
+    try {
+      const items = await this.dao.getReadyForRetry(Date.now());
+
+      for (const item of items) {
+        let payload: unknown;
+        try {
+          payload = JSON.parse(item.payload) as unknown;
+        } catch (e) {
+          console.warn('[SyncService] Invalid payload JSON for id', item.id, e);
+          await this.dao.markFailed(item.id);
+          continue;
+        }
+
+        try {
+          await executeAction(item.action, payload);
+          await this.dao.delete(item.id);
+        } catch (e) {
+          console.warn('[SyncService] Action failed', item.action, item.id, e);
+          const retryCount = item.retry_count + 1;
+          const maxRetries = item.max_retries ?? MAX_RETRIES;
+          if (retryCount >= maxRetries) {
+            await this.dao.markFailed(item.id);
+          } else {
+            await this.dao.scheduleRetry(item.id, retryCount);
+          }
+        }
+      }
+    } finally {
+      this.processing = false;
+    }
+  }
+
+  /**
+   * Full sync: fetch chats, then messages for each chat.
+   * Handles errors gracefully (log, don't throw).
+   */
+  async fullSync(): Promise<void> {
+    try {
+      const res = await apiGet('/chats');
+      if (!res.ok) {
+        const text = await res.text();
+        console.warn('[SyncService] fullSync chats failed:', res.status, text);
+        return;
+      }
+      const data = (await res.json()) as ApiChat[];
+      const mapped: Chat[] = data.map(mapApiChatToChat);
+      mapped.sort((a, b) => {
+        if (a.is_pinned !== b.is_pinned) return b.is_pinned - a.is_pinned;
+        const atA = a.last_message_at ?? 0;
+        const atB = b.last_message_at ?? 0;
+        return atB - atA;
+      });
+      chatStore.getState().setChats(mapped);
+    } catch (e) {
+      console.warn('[SyncService] fullSync chats error:', e);
+      return;
+    }
+
+    const chats = chatStore.getState().chats;
+    for (const chat of chats) {
+      try {
+        const res = await apiGet(`/chats/${chat.id}/messages?limit=30`);
+        if (!res.ok) {
+          const text = await res.text();
+          console.warn('[SyncService] fullSync messages failed for', chat.id, res.status, text);
+          continue;
+        }
+        const data = (await res.json()) as ApiMessage[];
+        const mapped: Message[] = data.map(mapApiMessageToMessage);
+        messageStore.getState().setMessages(chat.id, mapped);
+      } catch (e) {
+        console.warn('[SyncService] fullSync messages error for', chat.id, e);
+      }
+    }
+  }
+
+  /**
+   * Run on WebSocket connect: process queue first, then full sync.
+   */
+  async runOnConnect(): Promise<void> {
+    await this.processSyncQueue();
+    await this.fullSync();
+  }
+}
+
+export const SyncService = new SyncServiceClass();
