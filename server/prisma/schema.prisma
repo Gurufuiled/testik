@@ -1,0 +1,181 @@
+// Prisma schema for messenger backend
+// Aligned with mobile SQLite schema where applicable
+// Run: npx prisma generate | npx prisma migrate dev
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- Enums ---
+
+enum ChatType {
+  private
+  group
+}
+
+enum MessageType {
+  text
+  image
+  voice
+  video_note
+  video
+  file
+  system
+}
+
+enum MediaType {
+  image
+  voice
+  video_note
+  video
+  file
+}
+
+enum MessageStatus {
+  pending
+  sent
+  delivered
+  read
+}
+
+enum Transport {
+  p2p
+  websocket
+}
+
+enum ChatMemberRole {
+  owner
+  admin
+  member
+}
+
+// --- Models ---
+
+model User {
+  id           String    @id @default(uuid())
+  loginusId    String?   @unique @map("loginus_id") // OAuth Loginus user id
+  username     String?   @unique
+  displayName  String?   @map("display_name")
+  avatarUrl    String?   @map("avatar_url")
+  phone        String?   @unique
+  isOnline     Boolean   @default(false) @map("is_online")
+  lastSeen     DateTime? @map("last_seen")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  refreshTokens RefreshToken[]
+  chatMembers   ChatMember[]
+  createdChats  Chat[]         @relation("ChatCreator")
+  messages      Message[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+model Chat {
+  id                  String    @id @default(uuid())
+  chatType            ChatType  @map("chat_type")
+  name                String?
+  avatarUrl           String?   @map("avatar_url")
+  createdById         String    @map("created_by_id")
+  lastMessageId       String?   @map("last_message_id")
+  lastMessageAt       DateTime? @map("last_message_at")
+  lastMessagePreview  String?   @map("last_message_preview")
+  unreadCount         Int       @default(0) @map("unread_count") // per-chat, can be computed per user
+  isMuted             Boolean   @default(false) @map("is_muted")
+  isPinned            Boolean   @default(false) @map("is_pinned")
+  isArchived          Boolean   @default(false) @map("is_archived")
+  draft               String?
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  createdBy   User        @relation("ChatCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  lastMessage Message?    @relation("ChatLastMessage", fields: [lastMessageId], references: [id], onDelete: SetNull)
+  members     ChatMember[]
+  messages    Message[]
+
+  @@index([createdById])
+  @@index([lastMessageAt])
+  @@map("chats")
+}
+
+model ChatMember {
+  chatId   String        @map("chat_id")
+  userId   String        @map("user_id")
+  role     ChatMemberRole @default(member)
+  joinedAt DateTime      @default(now()) @map("joined_at")
+
+  chat Chat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([chatId, userId])
+  @@index([userId])
+  @@map("chat_members")
+}
+
+model Message {
+  id        String       @id @default(uuid())
+  chatId    String       @map("chat_id")
+  senderId  String       @map("sender_id")
+  msgType   MessageType  @map("msg_type")
+  content   String?
+  replyToId String?      @map("reply_to_id")
+  isEdited  Boolean      @default(false) @map("is_edited")
+  isDeleted Boolean      @default(false) @map("is_deleted")
+  status    MessageStatus @default(pending)
+  transport Transport?   // p2p or websocket
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+
+  chat       Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  sender     User     @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  replyTo    Message? @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies    Message[] @relation("MessageReplies")
+  media      Media[]
+  chatsAsLastMessage Chat[] @relation("ChatLastMessage")
+
+  @@index([chatId])
+  @@index([senderId])
+  @@index([replyToId])
+  @@index([createdAt])
+  @@map("messages")
+}
+
+model Media {
+  id          String    @id @default(uuid())
+  messageId   String    @map("message_id")
+  mediaType   MediaType @map("media_type")
+  fileName    String?   @map("file_name")
+  mimeType    String?   @map("mime_type")
+  fileSize    Int?      @map("file_size")
+  width       Int?
+  height      Int?
+  durationMs  Int?      @map("duration_ms")
+  remoteUrl   String?   @map("remote_url") // S3 or server path
+  waveform    Bytes?    // voice/video_note waveform data
+  isRound     Boolean   @default(false) @map("is_round")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+  @@map("media")
+}
