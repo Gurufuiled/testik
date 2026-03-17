@@ -15,25 +15,45 @@ export function toSnakeCase<T = unknown>(
   obj: T,
 ): T extends Date ? number : T extends (infer U)[] ? unknown[] : unknown {
   if (obj === null || obj === undefined) {
-    return obj as T extends Date ? number : T extends (infer U)[] ? unknown[] : unknown;
+    return obj as T extends Date
+      ? number
+      : T extends (infer U)[]
+        ? unknown[]
+        : unknown;
   }
   if (obj instanceof Date) {
     return obj.getTime() as T extends Date ? number : never;
   }
   if (Buffer.isBuffer(obj) || obj instanceof Uint8Array) {
-    return Buffer.from(obj).toString('base64') as T extends Date ? number : T extends (infer U)[] ? unknown[] : unknown;
+    return Buffer.from(obj).toString('base64') as T extends Date
+      ? number
+      : T extends (infer U)[]
+        ? unknown[]
+        : unknown;
   }
   if (Array.isArray(obj)) {
-    return obj.map((item) => toSnakeCase(item)) as T extends Date ? number : T extends (infer U)[] ? unknown[] : unknown;
+    return obj.map((item) => toSnakeCase(item)) as T extends Date
+      ? number
+      : T extends (infer U)[]
+        ? unknown[]
+        : unknown;
   }
   if (typeof obj === 'object' && obj.constructor === Object) {
     const result: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(obj)) {
       result[camelToSnake(key)] = toSnakeCase(value);
     }
-    return result as T extends Date ? number : T extends (infer U)[] ? unknown[] : unknown;
+    return result as T extends Date
+      ? number
+      : T extends (infer U)[]
+        ? unknown[]
+        : unknown;
   }
-  return obj as T extends Date ? number : T extends (infer U)[] ? unknown[] : unknown;
+  return obj as T extends Date
+    ? number
+    : T extends (infer U)[]
+      ? unknown[]
+      : unknown;
 }
 
 // --- Mappers ---
@@ -200,7 +220,9 @@ export function mapMedia(media: Media): MappedMedia {
     height: media.height ?? null,
     duration_ms: media.durationMs ?? null,
     remote_url: media.remoteUrl ?? null,
-    waveform: media.waveform ? Buffer.from(media.waveform).toString('base64') : null,
+    waveform: media.waveform
+      ? Buffer.from(media.waveform).toString('base64')
+      : null,
     is_round: media.isRound,
     created_at: dateToUnixMs(media.createdAt) ?? 0,
   };

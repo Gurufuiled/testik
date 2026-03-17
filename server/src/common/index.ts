@@ -18,3 +18,4 @@ export {
 } from './mappers';
 
 export { SnakeCaseInterceptor } from './snake-case.interceptor';
+export { LimitPipe } from './pipes/limit.pipe';

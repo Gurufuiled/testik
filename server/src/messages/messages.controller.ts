@@ -1,15 +1,7 @@
-import {
-  Controller,
-  Get,
-  Param,
-  Query,
-  UseGuards,
-  ParseIntPipe,
-  DefaultValuePipe,
-} from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { MessagesService } from './messages.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { CurrentUser } from '../common';
+import { CurrentUser, LimitPipe } from '../common';
 import type { User } from '@prisma/client';
 
 @Controller('chats')
@@ -21,7 +13,7 @@ export class MessagesController {
   async getMessages(
     @Param('id') chatId: string,
     @CurrentUser() user: User,
-    @Query('limit', new DefaultValuePipe(50), ParseIntPipe) limit: number,
+    @Query('limit', new LimitPipe(1, 100, 50)) limit: number,
     @Query('before') before?: string,
   ) {
     return this.messagesService.getMessagesForChat(

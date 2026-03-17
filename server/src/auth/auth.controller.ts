@@ -24,7 +24,10 @@ export class AuthController {
   @Get('login-url')
   getLoginUrl() {
     const result = this.authService.getLoginUrl();
-    console.log('[Auth] GET /login-url →', { url: result.url?.slice(0, 80) + '...', redirect_uri: result.redirect_uri });
+    console.log('[Auth] GET /login-url →', {
+      url: result.url?.slice(0, 80) + '...',
+      redirect_uri: result.redirect_uri,
+    });
     return result;
   }
 
@@ -35,8 +38,14 @@ export class AuthController {
     @Query('error') error: string,
     @Res() res: Express.Response,
   ) {
-    console.log('[Auth] GET /callback ← Loginus redirect', { hasCode: !!code, codeLen: code?.length, error: error || null });
-    const redirectUri = process.env.LOGINUS_REDIRECT_URI || 'http://localhost:4000/api/auth/callback';
+    console.log('[Auth] GET /callback ← Loginus redirect', {
+      hasCode: !!code,
+      codeLen: code?.length,
+      error: error || null,
+    });
+    const redirectUri =
+      process.env.LOGINUS_REDIRECT_URI ||
+      'http://localhost:4000/api/auth/callback';
     const payload = error
       ? { type: 'auth', error }
       : !code
@@ -77,8 +86,14 @@ export class AuthController {
   @Post('loginus')
   @HttpCode(HttpStatus.OK)
   async loginus(@Body() dto: LoginusDto) {
-    console.log('[Auth] POST /loginus ← app exchange code', { hasCode: !!dto?.code, redirect_uri: dto?.redirect_uri });
-    const result = await this.authService.loginWithCode(dto.code, dto.redirect_uri);
+    console.log('[Auth] POST /loginus ← app exchange code', {
+      hasCode: !!dto?.code,
+      redirect_uri: dto?.redirect_uri,
+    });
+    const result = await this.authService.loginWithCode(
+      dto.code,
+      dto.redirect_uri,
+    );
     console.log('[Auth] POST /loginus → success', { userId: result.user?.id });
     return result;
   }

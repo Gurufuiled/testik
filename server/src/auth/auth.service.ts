@@ -11,7 +11,9 @@ import axios from 'axios';
 import { randomUUID } from 'crypto';
 
 /** Декодирует JWT payload без проверки подписи (для id_token от Loginus). */
-function decodeJwtPayload<T = Record<string, unknown>>(token: string): T | null {
+function decodeJwtPayload<T = Record<string, unknown>>(
+  token: string,
+): T | null {
   try {
     const parts = token.split('.');
     if (parts.length !== 3) return null;
@@ -68,7 +70,8 @@ export class AuthService {
 
   getLoginUrl(): { url: string; redirect_uri: string } {
     const redirectUri =
-      process.env.LOGINUS_REDIRECT_URI || 'http://localhost:4000/api/auth/callback';
+      process.env.LOGINUS_REDIRECT_URI ||
+      'http://localhost:4000/api/auth/callback';
     const params = new URLSearchParams({
       client_id: this.loginusClientId || 'messenger',
       redirect_uri: redirectUri,
@@ -80,7 +83,10 @@ export class AuthService {
     return { url, redirect_uri: redirectUri };
   }
 
-  async logout(userId: string, idToken?: string): Promise<{ ok: boolean; slo_url?: string }> {
+  async logout(
+    userId: string,
+    idToken?: string,
+  ): Promise<{ ok: boolean; slo_url?: string }> {
     await this.prisma.refreshToken.deleteMany({ where: { userId } });
 
     if (!idToken || !idToken.trim()) {
@@ -119,17 +125,14 @@ export class AuthService {
 
     try {
       const { data: res } = await axios.post<
-        LoginusTokenResponse | { success?: boolean; data?: LoginusTokenResponse }
-      >(
-        tokenUrl,
-        params.toString(),
-        {
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            Accept: 'application/json',
-          },
+        | LoginusTokenResponse
+        | { success?: boolean; data?: LoginusTokenResponse }
+      >(tokenUrl, params.toString(), {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Accept: 'application/json',
         },
-      );
+      });
       const tokens =
         res && typeof res === 'object' && 'data' in res && res.data
           ? res.data
@@ -178,7 +181,8 @@ export class AuthService {
             : axiosErr?.message;
       console.error('[Auth] Loginus userinfo failed:', { status, body, msg });
       throw new UnauthorizedException(
-        msg || `Invalid or expired access token (Loginus: ${status ?? 'unknown'})`,
+        msg ||
+          `Invalid or expired access token (Loginus: ${status ?? 'unknown'})`,
       );
     }
   }
@@ -193,8 +197,7 @@ export class AuthService {
       );
     }
     const tokens = await this.exchangeCodeForToken(code, redirectUri);
-    const loginusAccessToken =
-      tokens.access_token ?? tokens.accessToken ?? '';
+    const loginusAccessToken = tokens.access_token ?? tokens.accessToken ?? '';
     if (!loginusAccessToken) {
       throw new UnauthorizedException(
         'Loginus did not return access_token. Check client config and redirect_uri.',
@@ -236,7 +239,8 @@ export class AuthService {
       id: loginusId,
     });
     const loginusRefresh =
-      tokens.refresh_token ?? (tokens as { refreshToken?: string }).refreshToken;
+      tokens.refresh_token ??
+      (tokens as { refreshToken?: string }).refreshToken;
     const { access_token, expires_at, refresh_token } = await this.issueTokens(
       user,
       loginusRefresh,
