@@ -27,7 +27,7 @@ export async function initDatabase(): Promise<SQLite.SQLiteDatabase> {
   const currentVersion = versionRow?.user_version ?? 0;
 
   if (currentVersion < DB_VERSION) {
-    // v1->v2: РїРѕР»РЅС‹Р№ СЃР±СЂРѕСЃ Р‘Р” (РёСЃРїСЂР°РІР»РµРЅРёРµ "no such column: id")
+    // v1->v2: full DB reset (fix "no such column: id")
     if (currentVersion < 2) {
       await db.closeAsync();
       dbInstance = null;
@@ -35,6 +35,14 @@ export async function initDatabase(): Promise<SQLite.SQLiteDatabase> {
       db = await SQLite.openDatabaseAsync(DB_NAME);
       await db.execAsync('PRAGMA journal_mode=WAL;');
       await db.execAsync('PRAGMA foreign_keys=ON;');
+    }
+    // v2->v3: add handle column to users (only when upgrading from v2; skip if v1 reset)
+    if (currentVersion >= 2 && currentVersion < 3) {
+      try {
+        await db.execAsync('ALTER TABLE users ADD COLUMN handle TEXT;');
+      } catch {
+        // Column may already exist
+      }
     }
     await db.execAsync(SCHEMA_SQL);
     await db.runAsync('PRAGMA user_version = ' + DB_VERSION);

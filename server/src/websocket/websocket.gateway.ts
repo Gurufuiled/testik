@@ -9,6 +9,7 @@ import { Server } from 'ws';
 import { Injectable, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
+import { MessagesService } from '../messages/messages.service';
 
 const WS_PORT = parseInt(process.env.WS_PORT ?? '4001', 10);
 
@@ -32,6 +33,7 @@ export class WebsocketGateway
   constructor(
     private readonly jwtService: JwtService,
     private readonly prisma: PrismaService,
+    private readonly messagesService: MessagesService,
   ) {}
 
   async handleConnection(client: AuthenticatedSocket, ...args: unknown[]) {
@@ -130,6 +132,66 @@ export class WebsocketGateway
       set.forEach((client) => {
         if (client.readyState === 1) client.send(data);
       });
+    }
+  }
+
+  @SubscribeMessage('send_message')
+  async handleSendMessage(
+    client: AuthenticatedSocket,
+    payload: {
+      chat_id?: string;
+      content?: string | null;
+      msg_type?: string;
+      media?: {
+        url?: string;
+        duration_ms?: number;
+        waveform?: number[];
+        thumbnail_url?: string;
+        is_round?: boolean;
+        width?: number;
+        height?: number;
+        file_name?: string;
+        file_size?: number;
+        mime_type?: string;
+      };
+    },
+  ) {
+    if (!client.userId) return;
+    if (!payload || typeof payload !== 'object') {
+      this.logger.warn('send_message: invalid payload');
+      return;
+    }
+    const { chat_id: chatId, content, msg_type: msgType, media } = payload;
+    if (!chatId) return;
+
+    this.logger.log(`send_message received: chatId=${chatId} sender=${client.userId} content=${typeof content === 'string' ? content.slice(0, 50) : content} msgType=${msgType}`);
+
+    const effectiveMsgType = msgType ?? 'text';
+    if (effectiveMsgType === 'text') {
+      const c = content ?? '';
+      if (typeof c !== 'string' || c.trim() === '') {
+        this.logger.warn('send_message: content required for text');
+        return;
+      }
+    }
+
+    try {
+      const message = await this.messagesService.createMessage(
+        chatId,
+        client.userId,
+        effectiveMsgType,
+        content ?? null,
+        media,
+      );
+      const members = await this.getChatMemberIds(chatId);
+      this.logger.log(`send_message broadcast: msgId=${message.id} content=${message.content?.slice(0, 50)} to ${members.length} members: ${members.join(',')}`);
+      const data = JSON.stringify({
+        type: 'message',
+        message,
+      });
+      members.forEach((uid) => this.sendToUser(uid, data));
+    } catch (err) {
+      this.logger.warn(`send_message failed: ${err}`);
     }
   }
 

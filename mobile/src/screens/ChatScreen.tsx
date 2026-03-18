@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useSyncExternalStore } from 'react';
 import {
   FlatList,
   KeyboardAvoidingView,
@@ -11,11 +11,15 @@ import { useRoute, RouteProp } from '@react-navigation/native';
 import type { ChatsStackParamList } from '../navigation/types';
 import { authStore } from '../stores/authStore';
 import { messageStore } from '../stores/messageStore';
+import { TransportService } from '../services/TransportService';
+import { SyncService } from '../services/SyncService';
 import { InputBar } from '../components/InputBar';
 import { MessageTimeStatus, VoiceBubble } from '../components';
 import type { Message } from '../stores/types';
 
 type ChatRoute = RouteProp<ChatsStackParamList, 'Chat'>;
+
+const EMPTY_MESSAGES: Message[] = [];
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
@@ -26,13 +30,30 @@ export function ChatScreen() {
   const route = useRoute<ChatRoute>();
   const { chatId } = route.params;
   const currentUserId = authStore((s) => s.user?.id ?? null);
-  const messages = messageStore((s) => s.messagesByChatId[chatId] ?? []);
+  // useSyncExternalStore ensures UI updates when store changes (real-time messages)
+  const messages = useSyncExternalStore(
+    (onStoreChange) => messageStore.subscribe(onStoreChange),
+    () => messageStore.getState().messagesByChatId[chatId] ?? EMPTY_MESSAGES,
+    () => EMPTY_MESSAGES
+  );
+
+  // Load messages from API when opening chat with no messages (fixes recipient seeing empty)
+  useEffect(() => {
+    const existing = messageStore.getState().messagesByChatId[chatId];
+    if (__DEV__) {
+      console.log('[ChatScreen] mount', chatId, 'existing messages:', existing?.length ?? 0, 'first content:', existing?.[0]?.content?.slice(0, 30));
+    }
+    if (!existing?.length) {
+      SyncService.fetchMessagesForChat(chatId).catch(() => {});
+    }
+  }, [chatId]);
 
   const handleSendText = useCallback(
     (text: string) => {
       if (!currentUserId) return;
+      const tempId = `temp-${Date.now()}`;
       const msg: Message = {
-        id: `temp-${Date.now()}`,
+        id: tempId,
         chat_id: chatId,
         sender_id: currentUserId,
         msg_type: 'text',
@@ -46,8 +67,8 @@ export function ChatScreen() {
         created_at: Date.now(),
         updated_at: Date.now(),
       };
-      messageStore.getState().addMessage(chatId, msg);
-      // In real app: send via TransportService
+      messageStore.getState().prependMessage(chatId, msg);
+      TransportService.sendMessage(chatId, text, 'text', tempId);
     },
     [chatId, currentUserId]
   );
@@ -55,8 +76,9 @@ export function ChatScreen() {
   const handleSendVoice = useCallback(
     async (result: { uri: string; waveform: number[]; durationMs: number }) => {
       if (!currentUserId) return;
+      const tempId = `temp-${Date.now()}`;
       const msg: Message = {
-        id: `temp-${Date.now()}`,
+        id: tempId,
         chat_id: chatId,
         sender_id: currentUserId,
         msg_type: 'voice',
@@ -71,12 +93,19 @@ export function ChatScreen() {
         updated_at: Date.now(),
         media: [{ waveform: result.waveform, duration_ms: result.durationMs }],
       };
-      messageStore.getState().addMessage(chatId, msg);
+      messageStore.getState().prependMessage(chatId, msg);
+      await TransportService.sendVoiceMessage(
+        chatId,
+        { uri: result.uri, durationMs: result.durationMs, waveform: result.waveform },
+        tempId
+      );
     },
     [chatId, currentUserId]
   );
 
-  const inverted = [...messages].reverse();
+  // messages from store: [newest, ..., oldest] (prependMessage adds at front; API returns desc)
+  // inverted FlatList: first item at bottom, data[0] = newest
+  const listData = messages;
 
   return (
     <KeyboardAvoidingView
@@ -85,16 +114,25 @@ export function ChatScreen() {
       keyboardVerticalOffset={90}
     >
       <FlatList
-        data={inverted}
+        key={`${chatId}-${messages.length}`}
+        data={listData}
         keyExtractor={(m) => m.id}
         inverted
+        extraData={messages.length}
         renderItem={({ item }) => {
           const isMe = item.sender_id === currentUserId;
-          if (item.msg_type === 'text' && item.content) {
+          if (item.msg_type === 'text') {
+            const rawContent = item.content ?? '';
+            const displayContent = rawContent.trim() || ' ';
+            if (__DEV__ && !rawContent.trim()) {
+              console.log('[ChatScreen] empty content for msg', item.id, 'content type:', typeof item.content);
+            }
             return (
               <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleOther]}>
-                <View style={styles.textRow}>
-                  <Text style={[styles.textContent, isMe && styles.textContentMe]}>{item.content}</Text>
+                <Text style={[styles.textContent, isMe && styles.textContentMe]}>
+                  {displayContent}
+                </Text>
+                <View style={styles.timeRow}>
                   <MessageTimeStatus
                     time={formatTime(item.created_at)}
                     status={item.status}
@@ -134,7 +172,10 @@ const styles = StyleSheet.create({
   },
   bubbleMe: { alignSelf: 'flex-end', backgroundColor: '#007AFF' },
   bubbleOther: { backgroundColor: '#e5e5ea' },
-  textRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
-  textContent: { fontSize: 16, flex: 1 },
+  textContent: {
+    fontSize: 16,
+    color: '#000',
+  },
   textContentMe: { color: '#fff' },
+  timeRow: { alignSelf: 'flex-end', marginTop: 4 },
 });

@@ -1,5 +1,5 @@
 /**
- * Pure waveform utilities. No RN/expo deps вЂ” safe for unit tests in Node.
+ * Pure waveform utilities. No RN/expo deps - safe for unit tests in Node.
  */
 
 const METERING_MIN_DB = -160;

@@ -60,6 +60,7 @@ model User {
   id           String    @id @default(uuid())
   loginusId    String?   @unique @map("loginus_id") // OAuth Loginus user id
   username     String?   @unique
+  handle       String?   @unique @map("handle")
   displayName  String?   @map("display_name")
   avatarUrl    String?   @map("avatar_url")
   phone        String?   @unique

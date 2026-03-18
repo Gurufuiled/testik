@@ -8,7 +8,7 @@ export type AuthStackParamList = {
 
 export type ChatsStackParamList = {
   ChatList: undefined;
-  Chat: { chatId: string };
+  Chat: { chatId: string; chatTitle?: string };
 };
 
 export type MainTabParamList = {

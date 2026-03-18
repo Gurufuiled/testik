@@ -3,13 +3,14 @@
  * Uses PRAGMA user_version for migration tracking.
  */
 
-export const DB_VERSION = 2;
+export const DB_VERSION = 3;
 
 export const SCHEMA_SQL = `
 -- users
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   username TEXT NOT NULL,
+  handle TEXT,
   display_name TEXT,
   avatar_url TEXT,
   avatar_local_path TEXT,
@@ -52,7 +53,7 @@ CREATE TABLE IF NOT EXISTS chats (
 );
 
 -- chat_members
-CREATE TABLE chat_members (
+CREATE TABLE IF NOT EXISTS chat_members (
   chat_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
   role TEXT DEFAULT 'member',
@@ -63,7 +64,7 @@ CREATE TABLE chat_members (
 );
 
 -- messages
-CREATE TABLE messages (
+CREATE TABLE IF NOT EXISTS messages (
   id TEXT PRIMARY KEY,
   chat_id TEXT NOT NULL,
   sender_id TEXT NOT NULL,
@@ -83,7 +84,7 @@ CREATE TABLE messages (
 );
 
 -- media
-CREATE TABLE media (
+CREATE TABLE IF NOT EXISTS media (
   id TEXT PRIMARY KEY,
   message_id TEXT,
   media_type TEXT NOT NULL,

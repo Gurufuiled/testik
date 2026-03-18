@@ -22,6 +22,7 @@ export async function runDbTest(): Promise<void> {
   await userDao.insert({
     id: 'test-user-1',
     username: 'testuser',
+    handle: 'testuser',
     display_name: 'Test User',
     avatar_url: null,
     avatar_local_path: null,

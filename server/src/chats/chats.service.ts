@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  BadRequestException,
-  ForbiddenException,
-} from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { mapChat, type MappedChat } from '../common/mappers';
 import type { User } from '@prisma/client';
@@ -24,7 +20,7 @@ export class ChatsService {
       },
       include: {
         lastMessage: true,
-        members: includeMembers,
+        members: { include: { user: true } },
       },
       orderBy: {
         lastMessageAt: 'desc',
@@ -35,6 +31,7 @@ export class ChatsService {
       mapChat(chat, {
         includeLastMessage: true,
         includeMembers: includeMembers,
+        currentUserId: userId,
       }),
     );
   }
@@ -69,7 +66,7 @@ export class ChatsService {
           ],
         },
         include: {
-          members: true,
+          members: { include: { user: true } },
           lastMessage: true,
         },
       });
@@ -78,6 +75,7 @@ export class ChatsService {
         return mapChat(existing, {
           includeLastMessage: true,
           includeMembers: true,
+          currentUserId: currentUser.id,
         });
       }
 
@@ -93,13 +91,14 @@ export class ChatsService {
           },
         },
         include: {
-          members: true,
+          members: { include: { user: true } },
           lastMessage: true,
         },
       });
       return mapChat(chat, {
         includeLastMessage: true,
         includeMembers: true,
+        currentUserId: currentUser.id,
       });
     }
 

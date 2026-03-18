@@ -9,14 +9,15 @@ import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { WebSocketService } from '../services/WebSocketService';
 import { TransportService } from '../services/TransportService';
 import { SignalingService } from '../services/SignalingService';
+import { USE_P2P } from '../config';
 import { SyncService } from '../services/SyncService';
 import { authStore } from '../stores/authStore';
 import { messageStore } from '../stores/messageStore';
+import { chatStore } from '../stores/chatStore';
 import { uiStore } from '../stores/uiStore';
-import { MediaDao } from '../db';
 import type { Message } from '../stores/types';
 
-/** Server new_message payload shape */
+/** Server message payload shape (MappedMessage from backend) */
 interface ServerMessagePayload {
   id: string;
   chat_id: string;
@@ -25,7 +26,28 @@ interface ServerMessagePayload {
   msg_type: string;
   status: string;
   created_at: number | string;
-  media?: { duration_ms: number; waveform?: number[] }[];
+  media?: {
+    duration_ms?: number | null;
+    waveform?: string | null;
+    remote_url?: string | null;
+    width?: number | null;
+    height?: number | null;
+    file_name?: string | null;
+    file_size?: number | null;
+    is_round?: boolean;
+  }[];
+}
+
+function base64ToWaveformArray(s: string | null | undefined): number[] {
+  if (!s) return [];
+  try {
+    const binary = atob(s);
+    const arr = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
+    return Array.from(arr);
+  } catch {
+    return [];
+  }
 }
 
 function mapServerMessageToMessage(payload: ServerMessagePayload): Message {
@@ -51,11 +73,50 @@ function mapServerMessageToMessage(payload: ServerMessagePayload): Message {
   };
   if (payload.media?.length) {
     msg.media = payload.media.map((m) => ({
-      waveform: m.waveform ?? [],
-      duration_ms: m.duration_ms,
+      waveform: base64ToWaveformArray(m.waveform),
+      duration_ms: m.duration_ms ?? undefined,
+      remote_url: m.remote_url ?? undefined,
+      width: m.width ?? undefined,
+      height: m.height ?? undefined,
+      file_name: m.file_name ?? undefined,
+      file_size: m.file_size ?? undefined,
+      is_round: m.is_round,
     }));
   }
   return msg;
+}
+
+function buildMessagePreview(msg: Message): string {
+  const maxLen = 100;
+  if (msg.msg_type === 'text' && msg.content) {
+    return msg.content.length <= maxLen ? msg.content : msg.content.slice(0, maxLen) + '...';
+  }
+  const placeholders: Record<string, string> = {
+    voice: 'Voice message',
+    image: 'Photo',
+    video_note: 'Video note',
+    video: 'Video',
+    file: msg.media?.[0]?.file_name ?? 'File',
+  };
+  return placeholders[msg.msg_type] ?? 'Message';
+}
+
+function updateChatLastMessage(chatId: string, mapped: Message): void {
+  const chat = chatStore.getState().chats.find((c) => c.id === chatId);
+  if (!chat) {
+    // Chat not in list (e.g. recipient got first message) - refresh chats then fetch messages
+    if (__DEV__) console.log('[updateChatLastMessage] chat not found, refreshChats + fetchMessages', chatId);
+    SyncService.refreshChats()
+      .then(() => SyncService.fetchMessagesForChat(chatId))
+      .catch(() => {});
+    return;
+  }
+  chatStore.getState().updateChat({
+    ...chat,
+    last_message_id: mapped.id,
+    last_message_at: mapped.created_at,
+    last_message_preview: buildMessagePreview(mapped),
+  });
 }
 
 type WebSocketProviderProps = {
@@ -68,7 +129,7 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
   const handlersSetRef = useRef(false);
   const prevNetworkConnectedRef = useRef<boolean | null>(null);
 
-  // Reconnect WebSocket when network goes from offline to online (not on initial null→true)
+  // Reconnect WebSocket when network goes from offline to online (not on initial null->true)
   useEffect(() => {
     const wasOffline = prevNetworkConnectedRef.current === false;
     const isNowOnline = isNetworkConnected === true;
@@ -86,8 +147,11 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
       return;
     }
 
-    TransportService.init();
-    SignalingService.connect();
+    // Load chats immediately via HTTP (fixes empty list after app restart)
+    SyncService.refreshChats().catch(() => {});
+
+    TransportService.init().catch(() => {});
+    if (USE_P2P) SignalingService.connect();
 
     if (!handlersSetRef.current) {
       WebSocketService.setHandlers({
@@ -102,9 +166,40 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
         },
         onNewMessage: (payload) => {
           const msg = (payload as { message?: ServerMessagePayload }).message;
-          if (!msg?.chat_id) return;
+          if (!msg?.chat_id || !msg?.id) return;
+          // Deduplication: skip if we already have this message (same id)
+          const existing = messageStore.getState().messagesByChatId[msg.chat_id] ?? [];
+          if (existing.some((m) => m.id === msg.id)) return;
+          if (__DEV__) {
+            console.log('[WS onNewMessage] message from server', { id: msg.id, chat_id: msg.chat_id, content: msg.content, msg_type: msg.msg_type });
+          }
           const mapped = mapServerMessageToMessage(msg);
-          messageStore.getState().prependMessage(msg.chat_id, mapped);
+          const currentUserId = authStore.getState().user?.id ?? null;
+          const sendingCandidates = existing.filter(
+            (m) =>
+              m.status === 'sending' &&
+              m.sender_id === currentUserId &&
+              msg.sender_id === currentUserId &&
+              m.msg_type === msg.msg_type &&
+              (m.msg_type === 'text' ? m.content === msg.content : true)
+          );
+          // Take oldest (first sent) - array is [newest..oldest], confirmations arrive in order
+          const sending =
+            sendingCandidates.length > 0 ? sendingCandidates[sendingCandidates.length - 1] : undefined;
+          if (sending) {
+            messageStore.getState().updateMessage(msg.chat_id, sending.id, {
+              id: mapped.id,
+              content: mapped.content ?? null,
+              status: mapped.status,
+              created_at: mapped.created_at,
+              updated_at: mapped.updated_at,
+              ...(mapped.media?.length && { media: mapped.media }),
+            });
+          } else {
+            if (__DEV__) console.log('[WS onNewMessage] recipient: prependMessage', { chat_id: msg.chat_id, content: mapped.content });
+            messageStore.getState().prependMessage(msg.chat_id, mapped);
+          }
+          updateChatLastMessage(msg.chat_id, mapped);
         },
 
         onMessageAck: async (payload) => {
@@ -115,28 +210,17 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
             status?: string;
             user_id?: string;
           };
-          if (!chat_id || !message_id || !user_id || currentUserId !== user_id) return;
+          if (!chat_id || !message_id || !user_id || !status) return;
+          // Process only when ack is from recipient (we are the sender)
+          if (user_id === currentUserId) return;
 
           const messages = messageStore.getState().messagesByChatId[chat_id] ?? [];
-          const sendingList = messages.filter(
-            (m) => m.status === 'sending' && m.sender_id === currentUserId
-          );
-          const sending = sendingList.pop();
-          if (!sending) return;
+          const msg = messages.find((m) => m.id === message_id);
+          if (!msg || msg.sender_id !== currentUserId) return;
 
-          const tempId = sending.id;
-          messageStore.getState().updateMessage(chat_id, tempId, {
-            id: message_id,
+          messageStore.getState().updateMessage(chat_id, message_id, {
             status: status ?? 'sent',
           });
-
-          if (tempId !== message_id) {
-            const mediaDao = new MediaDao();
-            const mediaRows = await mediaDao.getByMessageId(tempId);
-            for (const m of mediaRows) {
-              await mediaDao.update({ id: m.id, message_id });
-            }
-          }
         },
 
         onTyping: (payload) => {

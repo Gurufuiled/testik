@@ -41,6 +41,7 @@ interface ApiChat {
   created_at: number;
   updated_at: number;
   members?: { user_id: string }[];
+  peer_display_name?: string | null;
 }
 
 function mapApiChatToChat(api: ApiChat): Chat {
@@ -61,6 +62,7 @@ function mapApiChatToChat(api: ApiChat): Chat {
     created_at: api.created_at,
     updated_at: api.updated_at,
     members: api.members,
+    peer_display_name: api.peer_display_name ?? null,
   };
 }
 
@@ -149,8 +151,7 @@ async function executeAction(action: string, payload: unknown): Promise<void> {
   switch (action) {
     case 'send_message_text': {
       const p = payload as PayloadText;
-      WebSocketService.send({
-        type: 'send_message',
+      WebSocketService.sendEvent('send_message', {
         chat_id: p.chatId,
         content: p.content,
         msg_type: p.msgType ?? 'text',
@@ -166,8 +167,7 @@ async function executeAction(action: string, payload: unknown): Promise<void> {
         type: 'audio/mp4',
       });
       const fullUrl = toFullUrl(baseUrl, result.url);
-      WebSocketService.send({
-        type: 'send_message',
+      WebSocketService.sendEvent('send_message', {
         chat_id: p.chatId,
         content: fullUrl,
         msg_type: 'voice',
@@ -199,8 +199,7 @@ async function executeAction(action: string, payload: unknown): Promise<void> {
         thumbnailUrl = toFullUrl(baseUrl, thumbResult.url);
       }
 
-      WebSocketService.send({
-        type: 'send_message',
+      WebSocketService.sendEvent('send_message', {
         chat_id: p.chatId,
         content: fullUrl,
         msg_type: 'video_note',
@@ -224,8 +223,7 @@ async function executeAction(action: string, payload: unknown): Promise<void> {
         type: imageMime,
       });
       const fullUrl = toFullUrl(baseUrl, result.url);
-      WebSocketService.send({
-        type: 'send_message',
+      WebSocketService.sendEvent('send_message', {
         chat_id: p.chatId,
         content: fullUrl,
         msg_type: 'image',
@@ -246,8 +244,7 @@ async function executeAction(action: string, payload: unknown): Promise<void> {
         type: p.mimeType ?? 'application/octet-stream',
       });
       const fullUrl = toFullUrl(baseUrl, result.url);
-      WebSocketService.send({
-        type: 'send_message',
+      WebSocketService.sendEvent('send_message', {
         chat_id: p.chatId,
         content: fullUrl,
         msg_type: 'file',
@@ -308,6 +305,45 @@ class SyncServiceClass {
       }
     } finally {
       this.processing = false;
+    }
+  }
+
+  /**
+   * Fetch messages for a chat from API and set in messageStore.
+   */
+  async fetchMessagesForChat(chatId: string): Promise<void> {
+    try {
+      const res = await apiGet(`/chats/${chatId}/messages?limit=50`);
+      if (!res.ok) return;
+      const data = (await res.json()) as ApiMessage[];
+      if (__DEV__ && data.length > 0) {
+        console.log('[SyncService] fetchMessagesForChat', chatId, 'count=', data.length, 'first=', { id: data[0]?.id, content: data[0]?.content, msg_type: data[0]?.msg_type });
+      }
+      const mapped: Message[] = data.map(mapApiMessageToMessage);
+      messageStore.getState().setMessages(chatId, mapped);
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
+   * Refresh chats list only (lightweight). Use when receiving message for unknown chat.
+   */
+  async refreshChats(): Promise<void> {
+    try {
+      const res = await apiGet('/chats');
+      if (!res.ok) return;
+      const data = (await res.json()) as ApiChat[];
+      const mapped: Chat[] = data.map(mapApiChatToChat);
+      mapped.sort((a, b) => {
+        if (a.is_pinned !== b.is_pinned) return b.is_pinned - a.is_pinned;
+        const atA = a.last_message_at ?? 0;
+        const atB = b.last_message_at ?? 0;
+        return atB - atA;
+      });
+      chatStore.getState().setChats(mapped);
+    } catch {
+      // ignore
     }
   }
 

@@ -22,7 +22,12 @@ export function LoginScreen({ onLogin }: Props) {
   const handleLoginPress = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/auth/login-url`);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      const res = await fetch(`${API_BASE_URL}/auth/login-url`, {
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
       const data = (await res.json()) as { url?: string };
       if (data?.url) {
         setLoginUrl(data.url);
@@ -30,7 +35,11 @@ export function LoginScreen({ onLogin }: Props) {
         Alert.alert('Error', 'Failed to get login URL');
       }
     } catch (err) {
-      Alert.alert('Error', 'Network error. Is the server running?');
+      const msg =
+        err instanceof Error && err.name === 'AbortError'
+          ? 'Сервер не отвечает (таймаут 15 сек). Проверьте: 1) Сервер запущен? 2) Выполнен ли adb reverse? (npm run adb:reverse)'
+          : 'Сервер недоступен. Запустите сервер и выполните: npm run adb:reverse';
+      Alert.alert('Ошибка сети', msg);
     } finally {
       setLoading(false);
     }
@@ -47,11 +56,19 @@ export function LoginScreen({ onLogin }: Props) {
           return;
         }
         if (!data?.code) return;
+        console.log('[Auth] onMessage: got code, calling loginWithCode');
         await authService.loginWithCode(data.code, data.redirect_uri ?? '');
+        console.log('[Auth] onMessage: loginWithCode OK, calling onLogin');
+        await onLogin();
         setLoginUrl(null);
-        onLogin();
-      } catch {
+        console.log('[Auth] onMessage: onLogin OK');
+      } catch (e) {
+        console.error('[Auth] onMessage: error', e);
         setLoginUrl(null);
+        Alert.alert(
+          'Ошибка входа',
+          e instanceof Error ? e.message : 'Не удалось обменять код. Проверьте adb reverse и доступность сервера.'
+        );
       }
     },
     [onLogin]
@@ -65,7 +82,14 @@ export function LoginScreen({ onLogin }: Props) {
           style={styles.webview}
           originWhitelist={['https://*', 'http://*']}
           onMessage={onMessage}
-          onError={() => setLoginUrl(null)}
+          onError={(e) => {
+            console.warn('[Auth] WebView onError', e.nativeEvent);
+            setLoginUrl(null);
+            Alert.alert(
+              'Ошибка загрузки',
+              'Не удалось загрузить страницу входа. Проверьте: сервер запущен, выполнен npm run adb:reverse'
+            );
+          }}
         />
       </View>
     );

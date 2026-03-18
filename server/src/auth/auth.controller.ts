@@ -22,8 +22,8 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Get('login-url')
-  getLoginUrl() {
-    const result = this.authService.getLoginUrl();
+  getLoginUrl(@Query('redirect_uri') redirectUriParam?: string) {
+    const result = this.authService.getLoginUrl(redirectUriParam);
     console.log('[Auth] GET /login-url →', {
       url: result.url?.slice(0, 80) + '...',
       redirect_uri: result.redirect_uri,

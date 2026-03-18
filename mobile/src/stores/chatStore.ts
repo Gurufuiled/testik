@@ -10,6 +10,7 @@ type ChatState = {
 type ChatActions = {
   setChats: (chats: Chat[]) => void;
   addChat: (chat: Chat) => void;
+  addOrUpdateChat: (chat: Chat) => void;
   updateChat: (chat: Chat) => void;
   setSelectedChat: (id: string | null) => void;
   setLoading: (loading: boolean) => void;
@@ -33,6 +34,17 @@ export const chatStore = create<ChatState & ChatActions>((set) => ({
         ? state.chats
         : [...state.chats, chat],
     })),
+
+  addOrUpdateChat: (chat) =>
+    set((state) => {
+      const idx = state.chats.findIndex((c) => c.id === chat.id);
+      if (idx >= 0) {
+        const next = [...state.chats];
+        next[idx] = chat;
+        return { chats: next };
+      }
+      return { chats: [chat, ...state.chats] };
+    }),
 
   updateChat: (chat) =>
     set((state) => ({

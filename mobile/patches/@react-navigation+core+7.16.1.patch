@@ -1,0 +1,623 @@
+diff --git a/node_modules/@react-navigation/core/lib/module/BaseNavigationContainer.js b/node_modules/@react-navigation/core/lib/module/BaseNavigationContainer.js
+index ee57b55..3ef12f2 100644
+--- a/node_modules/@react-navigation/core/lib/module/BaseNavigationContainer.js
++++ b/node_modules/@react-navigation/core/lib/module/BaseNavigationContainer.js
+@@ -125,7 +125,9 @@ export const BaseNavigationContainer = /*#__PURE__*/React.forwardRef(function Ba
+     }
+   });
+   const resetRoot = useLatestCallback(state => {
+-    const target = state?.key ?? keyedListeners.getState.root?.().key;
++    const rootGetter = keyedListeners.getState.root;
++    const rootState = rootGetter ? rootGetter() : undefined;
++    const target = state && state.key != null ? state.key : rootState ? rootState.key : undefined;
+     if (target == null) {
+       console.error(NOT_INITIALIZED_ERROR);
+     } else {
+@@ -136,7 +138,8 @@ export const BaseNavigationContainer = /*#__PURE__*/React.forwardRef(function Ba
+     }
+   });
+   const getRootState = useLatestCallback(() => {
+-    return keyedListeners.getState.root?.();
++    const rootGetter = keyedListeners.getState.root;
++    return rootGetter ? rootGetter() : undefined;
+   });
+   const getCurrentRoute = useLatestCallback(() => {
+     const state = getRootState();
+@@ -230,7 +233,9 @@ export const BaseNavigationContainer = /*#__PURE__*/React.forwardRef(function Ba
+   React.useEffect(() => {
+     if (!onReadyCalledRef.current && isReady()) {
+       onReadyCalledRef.current = true;
+-      onReadyRef.current?.();
++      if (onReadyRef.current) {
++        onReadyRef.current();
++      }
+       emitter.emit({
+         type: 'ready'
+       });
+@@ -260,21 +265,21 @@ export const BaseNavigationContainer = /*#__PURE__*/React.forwardRef(function Ba
+                 path += ' > ';
+               }
+             } else if (!params && typeof curr === 'number' && prev === 'routes') {
+-              path += pointer?.name;
++              path += pointer ? pointer.name : undefined;
+             } else if (!params) {
+-              path += ` > ${curr}`;
++              path += " > " + curr;
+               params = true;
+             } else {
+               if (typeof curr === 'number' || /^[0-9]+$/.test(curr)) {
+-                path += `[${curr}]`;
++                path += "[" + curr + "]";
+               } else if (/^[a-z$_]+$/i.test(curr)) {
+-                path += `.${curr}`;
++                path += "." + curr;
+               } else {
+-                path += `[${JSON.stringify(curr)}]`;
++                path += "[" + JSON.stringify(curr) + "]";
+               }
+             }
+           }
+-          const message = `Non-serializable values were found in the navigation state. Check:\n\n${path} (${reason})\n\nThis can break usage such as persisting and restoring state. This might happen if you passed non-serializable values such as function, class instances etc. in params. If you need to use components with callbacks in your options, you can use 'navigation.setOptions' instead. See https://reactnavigation.org/docs/troubleshooting#i-get-the-warning-non-serializable-values-were-found-in-the-navigation-state for more details.`;
++          const message = "Non-serializable values were found in the navigation state. Check:\n\n" + path + " (" + reason + ")\n\nThis can break usage such as persisting and restoring state. This might happen if you passed non-serializable values such as function, class instances etc. in params. If you need to use components with callbacks in your options, you can use 'navigation.setOptions' instead. See https://reactnavigation.org/docs/troubleshooting#i-get-the-warning-non-serializable-values-were-found-in-the-navigation-state for more details.";
+           if (!serializableWarnings.includes(message)) {
+             serializableWarnings.push(message);
+             console.warn(message);
+@@ -282,7 +287,8 @@ export const BaseNavigationContainer = /*#__PURE__*/React.forwardRef(function Ba
+         }
+         const duplicateRouteNamesResult = checkDuplicateRouteNames(hydratedState);
+         if (duplicateRouteNamesResult.length) {
+-          const message = `Found screens with the same name nested inside one another. Check:\n${duplicateRouteNamesResult.map(locations => `\n${locations.join(', ')}`)}\n\nThis can cause confusing behavior during navigation. Consider using unique names for each screen instead.`;
++          const duplicateMessageLines = duplicateRouteNamesResult.map(locations => "\n" + locations.join(', ')).join('');
++          const message = "Found screens with the same name nested inside one another. Check:\n" + duplicateMessageLines + "\n\nThis can cause confusing behavior during navigation. Consider using unique names for each screen instead.";
+           if (!duplicateNameWarnings.includes(message)) {
+             duplicateNameWarnings.push(message);
+             console.warn(message);
+@@ -306,7 +312,7 @@ export const BaseNavigationContainer = /*#__PURE__*/React.forwardRef(function Ba
+       return;
+     }
+     const payload = action.payload;
+-    let message = `The action '${action.type}'${payload ? ` with payload ${JSON.stringify(action.payload)}` : ''} was not handled by any navigator.`;
++    let message = "The action '" + action.type + "'" + (payload ? " with payload " + JSON.stringify(action.payload) : '') + " was not handled by any navigator.";
+     switch (action.type) {
+       case 'PRELOAD':
+       case 'NAVIGATE':
+@@ -314,24 +320,24 @@ export const BaseNavigationContainer = /*#__PURE__*/React.forwardRef(function Ba
+       case 'REPLACE':
+       case 'POP_TO':
+       case 'JUMP_TO':
+-        if (payload?.name) {
+-          message += `\n\nDo you have a screen named '${payload.name}'?\n\nIf you're trying to navigate to a screen in a nested navigator, see https://reactnavigation.org/docs/nesting-navigators#navigating-to-a-screen-in-a-nested-navigator.\n\nIf you're using conditional rendering, navigation will happen automatically and you shouldn't navigate manually, see.`;
++        if (payload && payload.name) {
++          message += "\n\nDo you have a screen named '" + payload.name + "'?\n\nIf you're trying to navigate to a screen in a nested navigator, see https://reactnavigation.org/docs/nesting-navigators#navigating-to-a-screen-in-a-nested-navigator.\n\nIf you're using conditional rendering, navigation will happen automatically and you shouldn't navigate manually, see.";
+         } else {
+-          message += `\n\nYou need to pass the name of the screen to navigate to.\n\nSee https://reactnavigation.org/docs/navigation-actions for usage.`;
++          message += "\n\nYou need to pass the name of the screen to navigate to.\n\nSee https://reactnavigation.org/docs/navigation-actions for usage.";
+         }
+         break;
+       case 'GO_BACK':
+       case 'POP':
+       case 'POP_TO_TOP':
+-        message += `\n\nIs there any screen to go back to?`;
++        message += "\n\nIs there any screen to go back to?";
+         break;
+       case 'OPEN_DRAWER':
+       case 'CLOSE_DRAWER':
+       case 'TOGGLE_DRAWER':
+-        message += `\n\nIs your screen inside a Drawer navigator?`;
++        message += "\n\nIs your screen inside a Drawer navigator?";
+         break;
+     }
+-    message += `\n\nThis is a development-only warning and won't be shown in production.`;
++    message += "\n\nThis is a development-only warning and won't be shown in production.";
+     console.error(message);
+   });
+   return /*#__PURE__*/_jsx(NavigationIndependentTreeContext.Provider, {
+@@ -343,7 +349,7 @@ export const BaseNavigationContainer = /*#__PURE__*/React.forwardRef(function Ba
+         children: /*#__PURE__*/_jsx(NavigationStateContext.Provider, {
+           value: context,
+           children: /*#__PURE__*/_jsx(UnhandledActionContext.Provider, {
+-            value: onUnhandledAction ?? defaultOnUnhandledAction,
++            value: onUnhandledAction != null ? onUnhandledAction : defaultOnUnhandledAction,
+             children: /*#__PURE__*/_jsx(DeprecatedNavigationInChildContext.Provider, {
+               value: navigationInChildEnabled,
+               children: /*#__PURE__*/_jsx(EnsureSingleNavigator, {
+diff --git a/node_modules/@react-navigation/core/lib/module/StaticNavigation.js b/node_modules/@react-navigation/core/lib/module/StaticNavigation.js
+index e20d571..d9c6bfb 100644
+--- a/node_modules/@react-navigation/core/lib/module/StaticNavigation.js
++++ b/node_modules/@react-navigation/core/lib/module/StaticNavigation.js
+@@ -233,11 +233,11 @@ export function createPathConfigForStaticNavigation(tree, options, auto) {
+     // So we add the screens and groups in the same order as they are defined
+     for (const key in t.config) {
+       if (key === 'screens' && t.config.screens) {
+-        Object.assign(screens, createPathConfigForScreens(t.config.screens, o?.initialRouteName ?? t.config.initialRouteName));
++        Object.assign(screens, createPathConfigForScreens(t.config.screens, o && o.initialRouteName != null ? o.initialRouteName : t.config.initialRouteName));
+       }
+       if (key === 'groups' && t.config.groups) {
+         Object.entries(t.config.groups).forEach(([, group]) => {
+-          Object.assign(screens, createPathConfigForScreens(group.screens, o?.initialRouteName ?? t.config.initialRouteName));
++          Object.assign(screens, createPathConfigForScreens(group.screens, o && o.initialRouteName != null ? o.initialRouteName : t.config.initialRouteName));
+         });
+       }
+     }
+diff --git a/node_modules/@react-navigation/core/lib/module/getPathFromState.js b/node_modules/@react-navigation/core/lib/module/getPathFromState.js
+index ef4e3af..e1bf481 100644
+--- a/node_modules/@react-navigation/core/lib/module/getPathFromState.js
++++ b/node_modules/@react-navigation/core/lib/module/getPathFromState.js
+@@ -12,8 +12,8 @@ const getActiveRoute = state => {
+ };
+ const cachedNormalizedConfigs = new WeakMap();
+ const getNormalizedConfigs = options => {
+-  if (!options?.screens) return {};
+-  const cached = cachedNormalizedConfigs.get(options?.screens);
++  if (!(options && options.screens)) return {};
++  const cached = cachedNormalizedConfigs.get(options.screens);
+   if (cached) return cached;
+   const normalizedConfigs = createNormalizedConfigs(options.screens);
+   cachedNormalizedConfigs.set(options.screens, normalizedConfigs);
+@@ -79,7 +79,8 @@ export function getPathFromState(state, options) {
+         const currentParams = Object.fromEntries(Object.entries(route.params).map(([key, value]) => {
+           if (value === undefined) {
+             if (options) {
+-              const optional = options.parts?.find(part => part.param === key)?.optional;
++              const matchingPart = options.parts ? options.parts.find(part => part.param === key) : undefined;
++              const optional = matchingPart ? matchingPart.optional : undefined;
+               if (optional) {
+                 return null;
+               }
+@@ -87,10 +88,10 @@ export function getPathFromState(state, options) {
+               return null;
+             }
+           }
+-          const stringify = options?.stringify?.[key] ?? String;
++          const stringify = options && options.stringify && options.stringify[key] ? options.stringify[key] : String;
+           return [key, stringify(value)];
+         }).filter(entry => entry != null));
+-        if (parts?.length) {
++        if (parts && parts.length) {
+           Object.assign(allParams, currentParams);
+         }
+         if (focusedRoute === route) {
+@@ -99,9 +100,9 @@ export function getPathFromState(state, options) {
+           focusedParams = {
+             ...currentParams
+           };
+-          parts
++          if (parts) {
+           // eslint-disable-next-line no-loop-func
+-          ?.forEach(({
++            parts.forEach(({
+             param
+           }) => {
+             if (param) {
+@@ -112,6 +113,7 @@ export function getPathFromState(state, options) {
+               }
+             }
+           });
++          }
+         }
+       }
+ 
+@@ -134,7 +136,7 @@ export function getPathFromState(state, options) {
+       }
+     }
+     if (currentOptions[route.name] !== undefined) {
+-      path += parts?.map(({
++      path += (parts ? parts : []).map(({
+         segment,
+         param,
+         optional
+@@ -186,7 +188,7 @@ export function getPathFromState(state, options) {
+   }
+ 
+   // Include the root path if specified
+-  if (options?.path) {
++  if (options && options.path) {
+     path = `${options.path}/${path}`;
+   }
+ 
+diff --git a/node_modules/@react-navigation/core/lib/module/getPatternParts.js b/node_modules/@react-navigation/core/lib/module/getPatternParts.js
+index 59b8008..b71372b 100644
+--- a/node_modules/@react-navigation/core/lib/module/getPatternParts.js
++++ b/node_modules/@react-navigation/core/lib/module/getPatternParts.js
+@@ -23,7 +23,7 @@ export function getPatternParts(path) {
+       if (current.segment === ':') {
+         isParam = true;
+       } else if (!isRegex) {
+-        throw new Error(`Encountered ':' in the middle of a segment in path: ${path}`);
++        throw new Error("Encountered ':' in the middle of a segment in path: " + path);
+       }
+     } else if (char === '(') {
+       if (isParam) {
+@@ -34,7 +34,7 @@ export function getPatternParts(path) {
+           isRegex = true;
+         }
+       } else {
+-        throw new Error(`Encountered '(' without preceding ':' in path: ${path}`);
++        throw new Error("Encountered '(' without preceding ':' in path: " + path);
+       }
+     } else if (char === ')') {
+       if (isParam && isRegex) {
+@@ -47,14 +47,14 @@ export function getPatternParts(path) {
+           isParam = false;
+         }
+       } else {
+-        throw new Error(`Encountered ')' without preceding '(' in path: ${path}`);
++        throw new Error("Encountered ')' without preceding '(' in path: " + path);
+       }
+     } else if (char === '?') {
+       if (current.param) {
+         isParam = false;
+         current.optional = true;
+       } else {
+-        throw new Error(`Encountered '?' without preceding ':' in path: ${path}`);
++        throw new Error("Encountered '?' without preceding ':' in path: " + path);
+       }
+     } else if (char == null || char === '/' && !isRegex) {
+       isParam = false;
+@@ -88,12 +88,12 @@ export function getPatternParts(path) {
+     }
+   }
+   if (isRegex) {
+-    throw new Error(`Could not find closing ')' in path: ${path}`);
++    throw new Error("Could not find closing ')' in path: " + path);
+   }
+   const params = parts.map(part => part.param).filter(Boolean);
+   for (const [index, param] of params.entries()) {
+     if (params.indexOf(param) !== index) {
+-      throw new Error(`Duplicate param name '${param}' found in path: ${path}`);
++      throw new Error("Duplicate param name '" + param + "' found in path: " + path);
+     }
+   }
+   return parts;
+diff --git a/node_modules/@react-navigation/core/lib/module/getStateFromPath.js b/node_modules/@react-navigation/core/lib/module/getStateFromPath.js
+index 7132844..1605bb9 100644
+--- a/node_modules/@react-navigation/core/lib/module/getStateFromPath.js
++++ b/node_modules/@react-navigation/core/lib/module/getStateFromPath.js
+@@ -33,14 +33,14 @@ export function getStateFromPath(path, options) {
+     initialRoutes,
+     configs
+   } = getConfigResources(options);
+-  const screens = options?.screens;
++  const screens = options ? options.screens : undefined;
+   let remaining = path.replace(/\/+/g, '/') // Replace multiple slash (//) with single ones
+   .replace(/^\//, '') // Remove extra leading slash
+   .replace(/\?.*$/, ''); // Remove query params which we will handle later
+ 
+   // Make sure there is a trailing slash
+   remaining = remaining.endsWith('/') ? remaining : `${remaining}/`;
+-  const prefix = options?.path?.replace(/^\//, ''); // Remove extra leading slash
++  const prefix = options && options.path ? options.path.replace(/^\//, '') : undefined; // Remove extra leading slash
+ 
+   if (prefix) {
+     // Make sure there is a trailing slash
+@@ -116,7 +116,7 @@ function prepareConfigResources(options) {
+     validatePathConfig(options);
+   }
+   const initialRoutes = getInitialRoutes(options);
+-  const configs = getSortedNormalizedConfigs(initialRoutes, options?.screens);
++  const configs = getSortedNormalizedConfigs(initialRoutes, options ? options.screens : undefined);
+   checkForDuplicatedConfigs(configs);
+   const configWithRegexes = getConfigsWithRegexes(configs);
+   return {
+@@ -127,7 +127,7 @@ function prepareConfigResources(options) {
+ }
+ function getInitialRoutes(options) {
+   const initialRoutes = [];
+-  if (options?.initialRouteName) {
++  if (options && options.initialRouteName) {
+     initialRoutes.push({
+       initialRouteName: options.initialRouteName,
+       parentScreens: []
+@@ -262,7 +262,7 @@ const matchAgainstConfigs = (remaining, configs) => {
+         const params = routeConfig && match.groups ? Object.fromEntries(Object.entries(match.groups).map(([key, value]) => {
+           const index = Number(key.replace('param_', ''));
+           const param = routeConfig.params.find(it => it.index === index);
+-          if (param?.screen === routeName && param?.name) {
++          if (param && param.screen === routeName && param.name) {
+             return [param.name, value];
+           }
+           return null;
+@@ -271,7 +271,7 @@ const matchAgainstConfigs = (remaining, configs) => {
+             return [key, undefined];
+           }
+           const decoded = decodeURIComponent(value);
+-          const parsed = routeConfig.parse?.[key] ? routeConfig.parse[key](decoded) : decoded;
++          const parsed = routeConfig.parse && routeConfig.parse[key] ? routeConfig.parse[key](decoded) : decoded;
+           return [key, parsed];
+         })) : undefined;
+         if (params && Object.keys(params).length) {
+@@ -346,7 +346,7 @@ const createNormalizedConfigs = (screen, routeConfig, initials, paths, parentScr
+       configs.push(createConfigItem(screen, [...routeNames], [...paths], config.parse));
+       configs.push(...aliasConfigs);
+     }
+-    if (typeof config !== 'string' && typeof config.path !== 'string' && config.alias?.length) {
++    if (typeof config !== 'string' && typeof config.path !== 'string' && config.alias && config.alias.length) {
+       throw new Error(`Screen '${screen}' doesn't specify a 'path'. A 'path' needs to be specified in order to use 'alias'.`);
+     }
+     if (config.screens) {
+diff --git a/node_modules/@react-navigation/core/lib/module/useNavigationBuilder.js b/node_modules/@react-navigation/core/lib/module/useNavigationBuilder.js
+index cd5e325..7ca270d 100644
+--- a/node_modules/@react-navigation/core/lib/module/useNavigationBuilder.js
++++ b/node_modules/@react-navigation/core/lib/module/useNavigationBuilder.js
+@@ -92,7 +92,8 @@ const getRouteConfigsFromChildren = (children, groupKey, groupOptions, groupLayo
+         return acc;
+       }
+     }
+-    throw new Error(`A navigator can only contain 'Screen', 'Group' or 'React.Fragment' as its direct children (found ${/*#__PURE__*/React.isValidElement(child) ? `'${typeof child.type === 'string' ? child.type : child.type?.name}'${child.props != null && typeof child.props === 'object' && 'name' in child.props && child.props?.name ? ` for the screen '${child.props.name}'` : ''}` : typeof child === 'object' ? JSON.stringify(child) : `'${String(child)}'`}). To render this component in the navigator, pass it in the 'component' prop to 'Screen'.`);
++    var foundPart = React.isValidElement(child) ? ("'" + (typeof child.type === 'string' ? child.type : (child.type && child.type.name)) + "'" + (child.props != null && typeof child.props === 'object' && 'name' in child.props && child.props.name ? (" for the screen '" + child.props.name + "'") : '')) : (typeof child === 'object' ? JSON.stringify(child) : ("'" + String(child) + "'"));
++    throw new Error("A navigator can only contain 'Screen', 'Group' or 'React.Fragment' as its direct children (found " + foundPart + "). To render this component in the navigator, pass it in the 'component' prop to 'Screen'.");
+   }, []);
+   if (process.env.NODE_ENV !== 'production') {
+     configs.forEach(config => {
+@@ -139,9 +140,9 @@ const getRouteConfigsFromChildren = (children, groupKey, groupOptions, groupLayo
+   return configs;
+ };
+ const getStateFromParams = params => {
+-  if (params?.state != null) {
++  if (params && params.state != null) {
+     return params.state;
+-  } else if (typeof params?.screen === 'string' && params?.initial !== false) {
++  } else if (params && typeof params.screen === 'string' && params.initial !== false) {
+     return {
+       routes: [{
+         name: params.screen,
+@@ -163,7 +164,8 @@ const getStateFromParams = params => {
+ export function useNavigationBuilder(createRouter, options) {
+   const navigatorKey = useRegisterNavigator();
+   const route = React.useContext(NavigationRouteContext);
+-  const isNestedParamsConsumed = typeof route?.params === 'object' && route.params != null ? CONSUMED_PARAMS in route.params && route.params[CONSUMED_PARAMS] === route.params : false;
++  const routeParams = route && typeof route.params === 'object' && route.params != null ? route.params : undefined;
++  const isNestedParamsConsumed = routeParams ? CONSUMED_PARAMS in routeParams && routeParams[CONSUMED_PARAMS] === routeParams : false;
+   const {
+     children,
+     layout,
+@@ -197,7 +199,7 @@ export function useNavigationBuilder(createRouter, options) {
+   }, {});
+   const routeNames = routeConfigs.map(config => config.props.name);
+   const routeKeyList = routeNames.reduce((acc, curr) => {
+-    acc[curr] = screens[curr].keys.map(key => key ?? '').join(':');
++    acc[curr] = screens[curr].keys.map(key => key != null ? key : '').join(':');
+     return acc;
+   }, {});
+   const routeParamList = routeNames.reduce((acc, curr) => {
+@@ -254,7 +256,7 @@ export function useNavigationBuilder(createRouter, options) {
+       const {
+         initialParams
+       } = screens[curr].props;
+-      const initialParamsFromParams = route?.params?.state == null && route?.params?.initial !== false && route?.params?.screen === curr ? route.params.params : undefined;
++      const initialParamsFromParams = route && route.params && route.params.state == null && route.params.initial !== false && route.params.screen === curr ? route.params.params : undefined;
+       acc[curr] = initialParams !== undefined || initialParamsFromParams !== undefined ? {
+         ...initialParams,
+         ...initialParamsFromParams
+@@ -266,16 +268,16 @@ export function useNavigationBuilder(createRouter, options) {
+     // We also need to re-initialize it if the state passed from parent was changed (maybe due to reset)
+     // Otherwise assume that the state was provided as initial state
+     // So we need to rehydrate it to make it usable
+-    if ((currentState === undefined || !isStateValid(currentState)) && route?.params?.state == null && !(typeof route?.params?.screen === 'string' && route?.params?.initial !== false) && !isNestedParamsConsumed) {
++    if ((currentState === undefined || !isStateValid(currentState)) && (!route || !route.params || route.params.state == null) && !(route && route.params && typeof route.params.screen === 'string' && route.params.initial !== false) && !isNestedParamsConsumed) {
+       return [undefined, router.getInitialState({
+         routeNames,
+         routeParamList: initialRouteParamList,
+         routeGetIdList
+       }), true, undefined];
+     } else {
+-      const paramsForState = isNestedParamsConsumed ? undefined : route?.params;
++      const paramsForState = isNestedParamsConsumed ? undefined : route ? route.params : undefined;
+       const stateFromParams = paramsForState ? getStateFromParams(paramsForState) : undefined;
+-      const stateBeforeInitialization = stateFromParams ?? currentState;
++      const stateBeforeInitialization = stateFromParams != null ? stateFromParams : currentState;
+       const hydratedState = stateBeforeInitialization == null ? router.getInitialState({
+         routeNames,
+         routeParamList: initialRouteParamList,
+@@ -322,7 +324,7 @@ export function useNavigationBuilder(createRouter, options) {
+   // Previously unhandled state is now valid again
+   // And current state no longer has any valid routes
+   // We should reuse the unhandled state instead of re-calculating the state
+-  if (unhandledState?.routes.every(r => routeNames.includes(r.name)) && state?.routes.every(r => !routeNames.includes(r.name))) {
++  if (unhandledState && unhandledState.routes.every(r => routeNames.includes(r.name)) && state && state.routes.every(r => !routeNames.includes(r.name))) {
+     shouldClearUnhandledState = true;
+     nextState = router.getRehydratedState(unhandledState, {
+       routeNames,
+@@ -338,8 +340,8 @@ export function useNavigationBuilder(createRouter, options) {
+       routeKeyChanges: Object.keys(routeKeyList).filter(name => name in previousRouteKeyList && routeKeyList[name] !== previousRouteKeyList[name])
+     });
+   }
+-  let didConsumeNestedParams = route?.params === paramsUsedForInitialization;
+-  if (route?.params && !didConsumeNestedParams) {
++  let didConsumeNestedParams = (route ? route.params : undefined) === paramsUsedForInitialization;
++  if (route && route.params && !didConsumeNestedParams) {
+     let action;
+     if (typeof route.params.state === 'object' && route.params.state != null && !isNestedParamsConsumed) {
+       didConsumeNestedParams = true;
+@@ -383,7 +385,7 @@ export function useNavigationBuilder(createRouter, options) {
+     }) : nextState;
+   }
+   React.useEffect(() => {
+-    if (didConsumeNestedParams && typeof route?.params === 'object' && route.params != null) {
++    if (didConsumeNestedParams && route && typeof route.params === 'object' && route.params != null) {
+       // Track whether the params have been already consumed
+       // Set it to the same object, so merged params can be handled again
+       Object.defineProperty(route.params, CONSUMED_PARAMS, {
+@@ -391,7 +393,7 @@ export function useNavigationBuilder(createRouter, options) {
+         enumerable: false
+       });
+     }
+-  }, [didConsumeNestedParams, route?.params]);
++  }, [didConsumeNestedParams, route ? route.params : undefined]);
+   const shouldUpdate = state !== nextState;
+   useScheduleUpdate(() => {
+     if (shouldUpdate) {
+@@ -456,12 +458,12 @@ export function useNavigationBuilder(createRouter, options) {
+     let route;
+     if (e.target) {
+       route = state.routes.find(route => route.key === e.target);
+-      if (route?.name) {
++      if (route && route.name) {
+         routeNames.push(route.name);
+       }
+     } else {
+       route = state.routes[state.index];
+-      routeNames.push(...Object.keys(screens).filter(name => route?.name === name));
++      routeNames.push(...Object.keys(screens).filter(name => route && route.name === name));
+     }
+     if (route == null) {
+       return;
+@@ -479,12 +481,16 @@ export function useNavigationBuilder(createRouter, options) {
+         route: route,
+         navigation
+       }) : listeners;
+-      return map ? Object.keys(map).filter(type => type === e.type).map(type => map?.[type]) : undefined;
++      return map ? Object.keys(map).filter(type => type === e.type).map(type => map[type]) : undefined;
+     }))
+     // We don't want same listener to be called multiple times for same event
+     // So we remove any duplicate functions from the array
+     .filter((cb, i, self) => cb && self.lastIndexOf(cb) === i);
+-    listeners.forEach(listener => listener?.(e));
++    listeners.forEach(listener => {
++      if (listener) {
++        listener(e);
++      }
++    });
+   });
+   useFocusEvents({
+     state,
+@@ -510,7 +516,7 @@ export function useNavigationBuilder(createRouter, options) {
+     router,
+     getState,
+     setState,
+-    key: route?.key,
++    key: route ? route.key : undefined,
+     actionListeners: childListeners.action,
+     beforeRemoveListeners: keyedListeners.beforeRemove,
+     routerConfigOptions: {
+@@ -522,7 +528,7 @@ export function useNavigationBuilder(createRouter, options) {
+   });
+   const onRouteFocus = useOnRouteFocus({
+     router,
+-    key: route?.key,
++    key: route ? route.key : undefined,
+     getState,
+     setState
+   });
+@@ -538,7 +544,9 @@ export function useNavigationBuilder(createRouter, options) {
+       };
+       setUnhandledState(state);
+     }
+-    onUnhandledActionParent?.(action);
++    if (onUnhandledActionParent) {
++      onUnhandledActionParent(action);
++    }
+   });
+   const navigation = useNavigationHelpers({
+     id: options.id,
+diff --git a/node_modules/@react-navigation/core/lib/module/useOptionsGetters.js b/node_modules/@react-navigation/core/lib/module/useOptionsGetters.js
+index 091f4de..bc86ebf 100644
+--- a/node_modules/@react-navigation/core/lib/module/useOptionsGetters.js
++++ b/node_modules/@react-navigation/core/lib/module/useOptionsGetters.js
+@@ -17,21 +17,22 @@ export function useOptionsGetters({
+     addOptionsGetter: parentAddOptionsGetter
+   } = React.useContext(NavigationStateContext);
+   const optionsChangeListener = React.useCallback(() => {
+-    const isFocused = navigation?.isFocused() ?? true;
++    const isFocused = navigation && navigation.isFocused ? navigation.isFocused() : true;
+     const hasChildren = Object.keys(optionsGettersFromChildRef.current).length;
+     if (isFocused && !hasChildren) {
+-      onOptionsChange(optionsRef.current ?? {});
++      onOptionsChange(optionsRef.current != null ? optionsRef.current : {});
+     }
+   }, [navigation, onOptionsChange]);
+   React.useEffect(() => {
+     optionsRef.current = options;
+     optionsChangeListener();
+-    return navigation?.addListener('focus', optionsChangeListener);
++    return navigation && navigation.addListener ? navigation.addListener('focus', optionsChangeListener) : undefined;
+   }, [navigation, options, optionsChangeListener]);
+   const getOptionsFromListener = React.useCallback(() => {
+     for (const key in optionsGettersFromChildRef.current) {
+       if (key in optionsGettersFromChildRef.current) {
+-        const result = optionsGettersFromChildRef.current[key]?.();
++        const getter = optionsGettersFromChildRef.current[key];
++        const result = getter ? getter() : undefined;
+ 
+         // null means unfocused route
+         if (result !== null) {
+@@ -42,7 +43,7 @@ export function useOptionsGetters({
+     return null;
+   }, []);
+   const getCurrentOptions = React.useCallback(() => {
+-    const isFocused = navigation?.isFocused() ?? true;
++    const isFocused = navigation && navigation.isFocused ? navigation.isFocused() : true;
+     if (!isFocused) {
+       return null;
+     }
+@@ -53,7 +54,7 @@ export function useOptionsGetters({
+     return optionsRef.current;
+   }, [navigation, getOptionsFromListener]);
+   React.useEffect(() => {
+-    return parentAddOptionsGetter?.(key, getCurrentOptions);
++    return parentAddOptionsGetter ? parentAddOptionsGetter(key, getCurrentOptions) : undefined;
+   }, [getCurrentOptions, parentAddOptionsGetter, key]);
+   const addOptionsGetter = React.useCallback((key, getter) => {
+     optionsGettersFromChildRef.current[key] = getter;
+diff --git a/node_modules/@react-navigation/core/lib/module/validatePathConfig.js b/node_modules/@react-navigation/core/lib/module/validatePathConfig.js
+index 1af1990..3d80e92 100644
+--- a/node_modules/@react-navigation/core/lib/module/validatePathConfig.js
++++ b/node_modules/@react-navigation/core/lib/module/validatePathConfig.js
+@@ -1,20 +1,20 @@
+ "use strict";
+ 
+-const formatToList = items => Object.entries(items).map(([key, value]) => `- ${key} (${value})`).join('\n');
++const formatToList = items => Object.entries(items).map(([key, value]) => '- ' + key + ' (' + value + ')').join('\n');
+ export function validatePathConfig(config, root = true) {
+-  const validation = {
++  const nestedValidation = root ? null : {
++    alias: 'array',
++    exact: 'boolean',
++    stringify: 'object',
++    parse: 'object'
++  };
++  const validation = Object.assign({
+     path: 'string',
+     initialRouteName: 'string',
+-    screens: 'object',
+-    ...(root ? null : {
+-      alias: 'array',
+-      exact: 'boolean',
+-      stringify: 'object',
+-      parse: 'object'
+-    })
+-  };
++    screens: 'object'
++  }, nestedValidation || {});
+   if (typeof config !== 'object' || config === null) {
+-    throw new Error(`Expected the configuration to be an object, but got ${JSON.stringify(config)}.`);
++    throw new Error('Expected the configuration to be an object, but got ' + JSON.stringify(config) + '.');
+   }
+   const validationErrors = Object.fromEntries(Object.keys(config).map(key => {
+     if (key in validation) {
+@@ -24,10 +24,10 @@ export function validatePathConfig(config, root = true) {
+       if (value !== undefined) {
+         if (type === 'array') {
+           if (!Array.isArray(value)) {
+-            return [key, `expected 'Array', got '${typeof value}'`];
++            return [key, "expected 'Array', got '" + typeof value + "'"];
+           }
+         } else if (typeof value !== type) {
+-          return [key, `expected '${type}', got '${typeof value}'`];
++          return [key, "expected '" + type + "', got '" + typeof value + "'"];
+         }
+       }
+     } else {
+@@ -36,10 +36,10 @@ export function validatePathConfig(config, root = true) {
+     return null;
+   }).filter(Boolean));
+   if (Object.keys(validationErrors).length) {
+-    throw new Error(`Found invalid properties in the configuration:\n${formatToList(validationErrors)}\n\nYou can only specify the following properties:\n${formatToList(validation)}\n\nIf you want to specify configuration for screens, you need to specify them under a 'screens' property.\n\nSee https://reactnavigation.org/docs/configuring-links for more details on how to specify a linking configuration.`);
++    throw new Error('Found invalid properties in the configuration:\n' + formatToList(validationErrors) + '\n\nYou can only specify the following properties:\n' + formatToList(validation) + "\n\nIf you want to specify configuration for screens, you need to specify them under a 'screens' property.\n\nSee https://reactnavigation.org/docs/configuring-links for more details on how to specify a linking configuration.");
+   }
+   if (root && 'path' in config && typeof config.path === 'string' && config.path.includes(':')) {
+-    throw new Error(`Found invalid path '${config.path}'. The 'path' in the top-level configuration cannot contain patterns for params.`);
++    throw new Error("Found invalid path '" + config.path + "'. The 'path' in the top-level configuration cannot contain patterns for params.");
+   }
+   if ('screens' in config && config.screens) {
+     Object.entries(config.screens).forEach(([_, value]) => {

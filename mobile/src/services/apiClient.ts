@@ -8,7 +8,7 @@
 import { API_BASE_URL, USE_MOCKS } from '../config';
 import { authStore } from '../stores/authStore';
 import { authService } from './AuthService';
-import { mockApiGet, mockApiPost } from './apiMocks';
+import { mockApiGet, mockApiPost, mockApiPatch } from './apiMocks';
 
 const FETCH_TIMEOUT_MS = 15000;
 
@@ -51,7 +51,7 @@ export async function apiFetch(
     } catch (err) {
       const msg =
         err instanceof Error && err.name === 'AbortError'
-          ? `РЎРµСЂРІРµСЂ РЅРµ РѕС‚РІРµС‡Р°РµС‚. РџСЂРѕРІРµСЂСЊ, С‡С‚Рѕ С‚РµР»РµС„РѕРЅ Рё РџРљ РІ РѕРґРЅРѕР№ СЃРµС‚Рё, API: ${API_BASE_URL}`
+          ? `Сервер не отвечает. Проверьте, что телефон и ПК в одной сети, API: ${API_BASE_URL}`
           : err instanceof Error
             ? err.message
             : String(err);
@@ -108,6 +108,28 @@ export async function apiPost(
   return apiFetch(path, {
     ...init,
     method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init?.headers as Record<string, string>),
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+}
+
+/**
+ * PATCH request with auth. Use for updating resources.
+ */
+export async function apiPatch(
+  path: string,
+  body?: unknown,
+  init?: ApiFetchOptions
+): Promise<Response> {
+  if (USE_MOCKS) {
+    return mockApiPatch(path, body);
+  }
+  return apiFetch(path, {
+    ...init,
+    method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
       ...(init?.headers as Record<string, string>),

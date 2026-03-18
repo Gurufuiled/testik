@@ -19,10 +19,15 @@ export function ChatListScreen() {
         renderItem={({ item }) => (
           <Pressable
             style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-            onPress={() => navigation.navigate('Chat', { chatId: item.id })}
+            onPress={() =>
+              navigation.navigate('Chat', {
+                chatId: item.id,
+                chatTitle: item.peer_display_name || item.name || 'Chat',
+              })
+            }
           >
             <Text style={styles.title} numberOfLines={1}>
-              {item.name || 'Chat'}
+              {item.peer_display_name || item.name || 'Chat'}
             </Text>
             {item.last_message_preview != null && (
               <Text style={styles.preview} numberOfLines={1}>

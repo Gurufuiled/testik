@@ -62,6 +62,7 @@ export type MappedUser = {
   id: string;
   loginus_id: string | null;
   username: string | null;
+  handle: string | null;
   display_name: string | null;
   avatar_url: string | null;
   phone: string | null;
@@ -76,6 +77,7 @@ export function mapUser(user: User): MappedUser {
     id: user.id,
     loginus_id: user.loginusId ?? null,
     username: user.username ?? null,
+    handle: user.handle ?? null,
     display_name: user.displayName ?? null,
     avatar_url: user.avatarUrl ?? null,
     phone: user.phone ?? null,
@@ -107,6 +109,7 @@ export type MappedChat = {
   chat_type: string;
   name: string | null;
   avatar_url: string | null;
+  peer_display_name?: string | null;
   created_by_id: string;
   last_message_id: string | null;
   last_message_at: number | null;
@@ -122,15 +125,22 @@ export type MappedChat = {
   last_message?: MappedMessage;
 };
 
+type ChatMemberWithUser = import('@prisma/client').ChatMember & { user?: User };
+
 export function mapChat(
-  chat: Chat & { members?: ChatMember[]; lastMessage?: Message | null },
-  opts?: { includeMembers?: boolean; includeLastMessage?: boolean },
+  chat: Chat & { members?: ChatMemberWithUser[]; lastMessage?: Message | null },
+  opts?: {
+    includeMembers?: boolean;
+    includeLastMessage?: boolean;
+    currentUserId?: string;
+  },
 ): MappedChat {
   const base: MappedChat = {
     id: chat.id,
     chat_type: chat.chatType,
     name: chat.name ?? null,
     avatar_url: chat.avatarUrl ?? null,
+    peer_display_name: null,
     created_by_id: chat.createdById,
     last_message_id: chat.lastMessageId ?? null,
     last_message_at: dateToUnixMs(chat.lastMessageAt),
@@ -143,6 +153,18 @@ export function mapChat(
     created_at: dateToUnixMs(chat.createdAt) ?? 0,
     updated_at: dateToUnixMs(chat.updatedAt) ?? 0,
   };
+  if (
+    chat.chatType === 'private' &&
+    opts?.currentUserId &&
+    chat.members?.length
+  ) {
+    const peer = chat.members.find((m) => m.userId !== opts.currentUserId);
+    base.peer_display_name =
+      peer?.user?.displayName ??
+      peer?.user?.username ??
+      peer?.user?.handle ??
+      'Unknown';
+  }
   if (opts?.includeMembers && chat.members) {
     base.members = chat.members.map(mapChatMember);
   }

@@ -13,10 +13,11 @@ export class UserDao {
 
   async insert(row: UserRow): Promise<void> {
     await this.db.runAsync(
-      `INSERT INTO users (id, username, display_name, avatar_url, avatar_local_path, phone, is_online, last_seen, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO users (id, username, handle, display_name, avatar_url, avatar_local_path, phone, is_online, last_seen, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       row.id,
       row.username,
+      row.handle ?? null,
       row.display_name ?? null,
       row.avatar_url ?? null,
       row.avatar_local_path ?? null,
@@ -44,7 +45,7 @@ export class UserDao {
     const values: unknown[] = [];
 
     const fields = [
-      'username', 'display_name', 'avatar_url', 'avatar_local_path', 'phone',
+      'username', 'handle', 'display_name', 'avatar_url', 'avatar_local_path', 'phone',
       'is_online', 'last_seen', 'created_at', 'updated_at'
     ] as const;
     for (const f of fields) {

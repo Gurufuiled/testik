@@ -6,12 +6,10 @@ import {
 import { randomUUID } from 'crypto';
 import { existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
-import type { Express } from 'express';
 import { MAX_FILE_SIZE } from './upload.constants';
 
 const UPLOAD_DIR = 'uploads';
-const ALLOWED_MIME_REGEX =
-  /^(image\/(?!svg)|audio\/|video\/|application\/pdf)/;
+const ALLOWED_MIME_REGEX = /^(image\/(?!svg)|audio\/|video\/|application\/pdf)/;
 
 @Injectable()
 export class UploadService {
@@ -24,7 +22,7 @@ export class UploadService {
     }
   }
 
-  async saveFile(file: Express.Multer.File): Promise<{ url: string }> {
+  async saveFile(file: { originalname: string; mimetype: string; size: number; path?: string; buffer?: Buffer }): Promise<{ url: string }> {
     if (!file || !file.originalname) {
       throw new BadRequestException('No file provided');
     }
@@ -48,8 +46,10 @@ export class UploadService {
     const filepath = join(this.uploadPath, filename);
 
     const fs = await import('fs/promises');
+    const buf = file.buffer;
+    if (!buf) throw new BadRequestException('File buffer is empty');
     try {
-      await fs.writeFile(filepath, file.buffer);
+      await fs.writeFile(filepath, buf);
     } catch {
       throw new InternalServerErrorException('Failed to save file');
     }

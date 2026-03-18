@@ -22,7 +22,7 @@ export class UploadController {
       limits: { fileSize: MAX_FILE_SIZE },
     }),
   )
-  async uploadFile(@UploadedFile() file: Express.Multer.File) {
+  async uploadFile(@UploadedFile() file: { originalname: string; mimetype: string; size: number; path?: string; buffer?: Buffer } | undefined) {
     if (!file) {
       throw new BadRequestException('No file provided');
     }

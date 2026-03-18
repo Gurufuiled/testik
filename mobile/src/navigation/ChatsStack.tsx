@@ -23,10 +23,10 @@ export function ChatsStack() {
       <Stack.Screen
         name="Chat"
         component={ChatScreen}
-        options={{
-          title: 'Chat',
+        options={({ route }) => ({
+          title: route.params.chatTitle ?? 'Chat',
           headerBackTitle: 'Back',
-        }}
+        })}
       />
     </Stack.Navigator>
   );

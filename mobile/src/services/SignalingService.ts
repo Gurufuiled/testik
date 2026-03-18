@@ -66,12 +66,13 @@ class SignalingServiceClass {
       this.ws = null;
     }
 
-    const url = getSignalingUrl();
+    const baseUrl = getSignalingUrl();
+    const sep = baseUrl.includes('?') ? '&' : '?';
+    const url = baseUrl + sep + 'token=' + encodeURIComponent(token);
     this.ws = new WebSocket(url);
 
     this.ws.onopen = () => {
       this.reconnectAttempt = 0;
-      this.sendAuth(token);
       for (const resolve of this.whenConnectedResolvers) resolve();
       this.whenConnectedResolvers = [];
     };
@@ -90,10 +91,6 @@ class SignalingServiceClass {
     this.ws.onerror = () => {
       this.handlers.onError?.(new Error('Signaling WebSocket error'));
     };
-  }
-
-  private sendAuth(token: string): void {
-    this.send({ type: 'auth', token });
   }
 
   private handleMessage(raw: string | Blob): void {

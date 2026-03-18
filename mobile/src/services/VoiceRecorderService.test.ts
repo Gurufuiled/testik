@@ -13,7 +13,7 @@ function assert(cond: boolean, msg: string): void {
 
 function assertClose(actual: number, expected: number, tolerance: number, msg: string): void {
   if (Math.abs(actual - expected) > tolerance) {
-    throw new Error(`${msg}: expected ${expected} В± ${tolerance}, got ${actual}`);
+    throw new Error(`${msg}: expected ${expected} +/- ${tolerance}, got ${actual}`);
   }
 }
 

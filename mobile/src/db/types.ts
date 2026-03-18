@@ -5,6 +5,7 @@
 export interface UserRow {
   id: string;
   username: string;
+  handle: string | null;
   display_name: string | null;
   avatar_url: string | null;
   avatar_local_path: string | null;
@@ -42,6 +43,8 @@ export interface ChatRow {
   updated_at: number;
   /** From API: members with user_id (for private chat peer lookup). */
   members?: { user_id: string }[];
+  /** From API: display name of peer in private chat. */
+  peer_display_name?: string | null;
 }
 
 export interface ChatMemberRow {

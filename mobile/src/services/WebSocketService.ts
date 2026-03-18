@@ -51,12 +51,14 @@ class WebSocketServiceClass {
       return;
     }
 
-    const url = getWebSocketUrl();
+    const baseUrl = getWebSocketUrl();
+    const sep = baseUrl.includes('?') ? '&' : '?';
+    const url = baseUrl + sep + 'token=' + encodeURIComponent(token);
     this.ws = new WebSocket(url);
 
     this.ws.onopen = () => {
       this.reconnectAttempt = 0;
-      this.sendAuth(token);
+      if (__DEV__) console.log('[WebSocket] connected', baseUrl);
       this.handlers.onConnected?.();
     };
 
@@ -64,7 +66,8 @@ class WebSocketServiceClass {
       this.handleMessage(event.data);
     };
 
-    this.ws.onclose = () => {
+    this.ws.onclose = (e) => {
+      if (__DEV__) console.log('[WebSocket] closed', e.code, e.reason);
       this.ws = null;
       this.handlers.onDisconnected?.();
       if (!this.manualDisconnect && authStore.getState().accessToken) {
@@ -75,10 +78,6 @@ class WebSocketServiceClass {
     this.ws.onerror = () => {
       // Error details come via onclose; avoid duplicate handling
     };
-  }
-
-  private sendAuth(token: string): void {
-    this.send({ type: 'auth', token });
   }
 
   private handleMessage(raw: string | Blob): void {
@@ -98,6 +97,10 @@ class WebSocketServiceClass {
     }
 
     const type = msg?.type;
+    if (__DEV__ && type === 'message') {
+      const m = (msg as { message?: { content?: string } }).message;
+      console.log('[WebSocket] RAW received type=message', { hasMessage: !!m, content: m?.content?.slice(0, 30) });
+    }
     if (!type) return;
 
     switch (type) {
@@ -119,6 +122,9 @@ class WebSocketServiceClass {
         this.handlers.onError?.(msg);
         break;
       default:
+        if (__DEV__ && type) {
+          console.log('[WebSocket] unhandled type', type, Object.keys(msg).slice(0, 5));
+        }
         break;
     }
   }
@@ -162,6 +168,11 @@ class WebSocketServiceClass {
 
     const payload = typeof data === 'string' ? data : JSON.stringify(data);
     this.ws.send(payload);
+  }
+
+  /** Send event in NestJS format: { event, data } */
+  sendEvent(event: string, data: Record<string, unknown>): void {
+    this.send({ event, data });
   }
 
   isConnected(): boolean {

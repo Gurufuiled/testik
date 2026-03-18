@@ -6,6 +6,7 @@
 
 import * as SecureStore from 'expo-secure-store';
 import { API_BASE_URL, LOGINUS_CLIENT_ID, OAUTH_REDIRECT_URI } from '../config';
+import { initDatabase } from './DatabaseService';
 import { AuthSessionDao } from '../db/dao/AuthSessionDao';
 import { UserDao } from '../db/dao/UserDao';
 import type { UserRow } from '../db/types';
@@ -17,6 +18,7 @@ export interface ApiUser {
   id: string;
   loginus_id: string | null;
   username: string | null;
+  handle: string | null;
   display_name: string | null;
   avatar_url: string | null;
   phone: string | null;
@@ -41,6 +43,7 @@ export function apiUserToUserRow(u: ApiUser): UserRow {
   return {
     id: u.id,
     username: u.username ?? '',
+    handle: u.handle ?? null,
     display_name: u.display_name,
     avatar_url: u.avatar_url,
     avatar_local_path: null,
@@ -57,6 +60,7 @@ function userRowToApiUser(r: UserRow): ApiUser {
     id: r.id,
     loginus_id: null,
     username: r.username,
+    handle: r.handle ?? null,
     display_name: r.display_name,
     avatar_url: r.avatar_url,
     phone: r.phone,
@@ -111,11 +115,16 @@ export class AuthService {
   /** Exchange OAuth code for tokens, save session, return user + tokens. */
   async loginWithCode(code: string, redirectUri: string): Promise<AuthSession> {
     console.log('[Auth] loginWithCode: exchanging', { codeLen: code?.length, redirect_uri: redirectUri });
+    await initDatabase();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
     const res = await fetch(`${API_BASE_URL}/auth/loginus`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code, redirect_uri: redirectUri }),
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
 
     if (!res.ok) {
       const err = (await res.json().catch(() => ({}))) as { message?: string };
@@ -155,7 +164,8 @@ export class AuthService {
     };
   }
 
-  private async saveUserToLocal(user: ApiUser): Promise<void> {
+  /** Save or update user from API response (e.g. after profile update). */
+  async saveUserToLocal(user: ApiUser): Promise<void> {
     const row = apiUserToUserRow(user);
     const existing = await this.userDao.getById(user.id);
     if (existing) {

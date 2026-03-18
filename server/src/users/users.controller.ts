@@ -33,6 +33,7 @@ export class UsersController {
     return this.usersService.updateProfile(user.id, {
       display_name: dto.display_name,
       avatar_url: dto.avatar_url,
+      handle: dto.handle,
     });
   }
 }
