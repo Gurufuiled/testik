@@ -1,24 +1,22 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActionSheetIOS,
   Alert,
-  Platform,
+  Image,
+  Modal,
+  Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
-  Pressable,
   View,
 } from 'react-native';
-import { colors, typography, MIN_TAP_TARGET } from '../theme/colors';
-
-/** Unicode icons: ⊕ attach, ◉ video note, ● mic record */
-const ICON_ATTACH = '\u2295';
-const ICON_VIDEO_NOTE = '\u25C9';
-const ICON_MIC = '\u25CF';
+import * as MediaLibrary from 'expo-media-library';
+import Feather from 'expo/node_modules/@expo/vector-icons/Feather';
+import MaterialCommunityIcons from 'expo/node_modules/@expo/vector-icons/MaterialCommunityIcons';
 import { GestureDetector } from 'react-native-gesture-handler';
+import { colors, typography, MIN_TAP_TARGET } from '../theme/colors';
 import { useVoiceRecordGesture } from '../hooks/useVoiceRecordGesture';
 import { DocumentPickerService } from '../services/DocumentPickerService';
-import { ImagePickerService } from '../services/ImagePickerService';
 import type { VoiceRecordingResult } from '../services/VoiceRecorderService';
 import type { VideoNoteRecordingResult } from '../services/VideoNoteRecorderService';
 import { VideoNoteRecorder } from './VideoNoteRecorder';
@@ -27,6 +25,7 @@ export interface ImagePickResult {
   uri: string;
   width?: number;
   height?: number;
+  caption?: string;
 }
 
 export interface FilePickResult {
@@ -46,24 +45,80 @@ export interface InputBarProps {
   onInputChange?: (text: string) => void;
 }
 
+type AttachmentAction = {
+  key: string;
+  title: string;
+  tone: 'file' | 'video';
+  onPress: () => Promise<void>;
+};
+
+type GalleryItem = {
+  id: string;
+  uri: string;
+  width?: number;
+  height?: number;
+};
+
+function PaperclipIcon() {
+  return <Feather name="paperclip" size={20} color="#6B7280" />;
+}
+
+function MicIcon() {
+  return <Feather name="mic" size={19} color="#6B7280" />;
+}
+
+function SendIcon() {
+  return <Feather name="send" size={18} color={colors.accent} />;
+}
+
+function SheetActionIcon({ tone }: { tone: AttachmentAction['tone'] }) {
+  if (tone === 'video') {
+    return <MaterialCommunityIcons name="play-circle-outline" size={22} color="#6B7280" />;
+  }
+
+  return <Feather name="file-text" size={19} color="#6B7280" />;
+}
+
 export function InputBar({
   onSendText,
   onSendVoice,
   onSendVideoNote,
   onSendImage,
   onSendFile,
-  placeholder = 'Message',
+  placeholder = 'Сообщение',
   onInputChange,
 }: InputBarProps) {
   const [inputText, setInputText] = useState('');
   const [showVideoNoteRecorder, setShowVideoNoteRecorder] = useState(false);
+  const [showAttachmentSheet, setShowAttachmentSheet] = useState(false);
+  const [galleryItems, setGalleryItems] = useState<GalleryItem[]>([]);
+  const [galleryLoading, setGalleryLoading] = useState(false);
+  const [galleryDenied, setGalleryDenied] = useState(false);
+  const [pendingImage, setPendingImage] = useState<ImagePickResult | null>(null);
 
-  const handleSendText = useCallback(() => {
+  const hasText = inputText.trim().length > 0;
+  const hasPendingImage = pendingImage != null;
+  const canSend = hasText || hasPendingImage;
+
+  const handleSend = useCallback(() => {
     const content = inputText.trim();
-    if (!content) return;
+    const selectedImage = pendingImage;
+
+    if (!content && !selectedImage) return;
+
     setInputText('');
+    setPendingImage(null);
+
+    if (selectedImage) {
+      void onSendImage?.({
+        ...selectedImage,
+        caption: content || undefined,
+      });
+      return;
+    }
+
     onSendText(content);
-  }, [inputText, onSendText]);
+  }, [inputText, onSendImage, onSendText, pendingImage]);
 
   const handleInputChange = useCallback(
     (text: string) => {
@@ -89,116 +144,251 @@ export function InputBar({
     setShowVideoNoteRecorder(false);
   }, []);
 
-  const showAttachmentMenu = useCallback(() => {
-    const options: string[] = [];
-    if (onSendImage) options.push('Photo');
-    if (onSendFile) options.push('File');
-    if (options.length === 0) return;
-
-    if (Platform.OS === 'ios' && ActionSheetIOS.showActionSheetWithOptions) {
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          options: [...options, 'Cancel'],
-          cancelButtonIndex: options.length,
-        },
-        async (buttonIndex) => {
-          if (buttonIndex === undefined || buttonIndex === options.length) return;
-          const choice = options[buttonIndex];
-          if (!choice) return;
-          try {
-            if (choice === 'Photo' && onSendImage) {
-              const result = await ImagePickerService.pickImage({ compress: true });
-              if (result) await onSendImage(result);
-            } else if (choice === 'File' && onSendFile) {
-              const result = await DocumentPickerService.pickDocument();
-              if (result) await onSendFile(result);
-            }
-          } catch (err) {
-            if (__DEV__) console.warn('[InputBar] Attachment error:', err);
-            Alert.alert('Error', 'Failed to attach. Please try again.');
-          }
-        }
-      );
-    } else {
-      const buttons = [
-        ...options.map((label) => ({
-          text: label,
-          onPress: async () => {
-            try {
-              if (label === 'Photo' && onSendImage) {
-                const result = await ImagePickerService.pickImage({ compress: true });
-                if (result) await onSendImage(result);
-              } else if (label === 'File' && onSendFile) {
-                const result = await DocumentPickerService.pickDocument();
-                if (result) await onSendFile(result);
-              }
-            } catch (err) {
-              if (__DEV__) console.warn('[InputBar] Attachment error:', err);
-              Alert.alert('Error', 'Failed to attach. Please try again.');
-            }
-          },
-        })),
-        { text: 'Cancel', style: 'cancel' as const },
-      ];
-      Alert.alert('Attach', 'Choose attachment type', buttons);
+  const runAttachmentAction = useCallback(async (action: () => Promise<void>) => {
+    setShowAttachmentSheet(false);
+    try {
+      await action();
+    } catch (err) {
+      if (__DEV__) console.warn('[InputBar] Attachment error:', err);
+      Alert.alert('Ошибка', 'Не удалось прикрепить файл. Попробуй ещё раз.');
     }
-  }, [onSendImage, onSendFile]);
+  }, []);
 
-  const showAttachmentButton = onSendImage != null || onSendFile != null;
+  const attachmentActions = useMemo<AttachmentAction[]>(() => {
+    const actions: AttachmentAction[] = [];
+
+    if (onSendFile) {
+      actions.push({
+        key: 'file',
+        title: 'Файл',
+        tone: 'file',
+        onPress: async () => {
+          const result = await DocumentPickerService.pickDocument();
+          if (result) await onSendFile(result);
+        },
+      });
+    }
+
+    if (onSendVideoNote) {
+      actions.push({
+        key: 'video-note',
+        title: 'Видео',
+        tone: 'video',
+        onPress: async () => {
+          setShowVideoNoteRecorder(true);
+        },
+      });
+    }
+
+    return actions;
+  }, [onSendFile, onSendVideoNote]);
+
+  const loadGallery = useCallback(async () => {
+    if (!onSendImage) return;
+
+    setGalleryLoading(true);
+    try {
+      const permission = await MediaLibrary.requestPermissionsAsync();
+      const granted = permission.granted || permission.accessPrivileges === 'limited';
+
+      if (!granted) {
+        setGalleryDenied(true);
+        setGalleryItems([]);
+        return;
+      }
+
+      setGalleryDenied(false);
+      const result = await MediaLibrary.getAssetsAsync({
+        mediaType: 'photo',
+        first: 48,
+        sortBy: [[MediaLibrary.SortBy.creationTime, false]],
+      });
+
+      setGalleryItems(
+        result.assets.map((asset) => ({
+          id: asset.id,
+          uri: asset.uri,
+          width: asset.width,
+          height: asset.height,
+        }))
+      );
+    } catch (err) {
+      if (__DEV__) console.warn('[InputBar] loadGallery error:', err);
+      setGalleryItems([]);
+    } finally {
+      setGalleryLoading(false);
+    }
+  }, [onSendImage]);
+
+  useEffect(() => {
+    if (showAttachmentSheet && onSendImage) {
+      loadGallery();
+    }
+  }, [showAttachmentSheet, onSendImage, loadGallery]);
+
+  const handlePickGalleryItem = useCallback(
+    async (item: GalleryItem) => {
+      if (!onSendImage) return;
+      setPendingImage({
+        uri: item.uri,
+        width: item.width,
+        height: item.height,
+      });
+      setShowAttachmentSheet(false);
+    },
+    [onSendImage]
+  );
+
+  const showAttachmentButton = onSendImage != null || attachmentActions.length > 0;
+
+  const openAttachmentSheet = useCallback(() => {
+    if (!showAttachmentButton) return;
+    setShowAttachmentSheet(true);
+  }, [showAttachmentButton]);
 
   return (
-    <View style={styles.inputRow}>
-      {showAttachmentButton && (
-        <Pressable
-          style={styles.iconButton}
-          onPress={showAttachmentMenu}
-          accessibilityRole="button"
-          accessibilityLabel="Attach file or photo"
-        >
-          <Text style={styles.iconText}>{ICON_ATTACH}</Text>
-        </Pressable>
-      )}
-      {onSendVideoNote != null && (
-        <Pressable
-          style={styles.iconButton}
-          onPress={() => setShowVideoNoteRecorder(true)}
-          accessibilityRole="button"
-          accessibilityLabel="Record video note"
-        >
-          <Text style={styles.iconText}>{ICON_VIDEO_NOTE}</Text>
-        </Pressable>
-      )}
-      <GestureDetector gesture={voiceGesture}>
-        <Pressable style={styles.iconButton}>
-          <Text style={styles.iconText}>{ICON_MIC}</Text>
-        </Pressable>
-      </GestureDetector>
-      <TextInput
-        style={styles.input}
-        placeholder={placeholder}
-        placeholderTextColor={colors.placeholder}
-        value={inputText}
-        onChangeText={handleInputChange}
-        multiline
-        maxLength={4096}
-      />
-      <Pressable
-        style={({ pressed }) => [
-          styles.sendButton,
-          (!inputText.trim() || pressed) && styles.sendButtonDisabled,
-        ]}
-        onPress={handleSendText}
-        disabled={!inputText.trim()}
+    <>
+      <View style={styles.inputRow}>
+        {pendingImage ? (
+          <View style={styles.previewCard}>
+            <Image source={{ uri: pendingImage.uri }} style={styles.previewImage} />
+            <View style={styles.previewTextWrap}>
+              <Text style={styles.previewTitle}>Фото готово к отправке</Text>
+              <Text style={styles.previewSubtitle}>
+                Можно добавить подпись и отправить одним сообщением
+              </Text>
+            </View>
+            <Pressable
+              style={styles.previewRemoveButton}
+              onPress={() => setPendingImage(null)}
+              accessibilityRole="button"
+              accessibilityLabel="Убрать выбранное фото"
+            >
+              <Feather name="x" size={16} color="#6B7280" />
+            </Pressable>
+          </View>
+        ) : null}
+
+        <View style={styles.composerShell}>
+          {showAttachmentButton ? (
+            <Pressable
+              style={styles.leadingAction}
+              onPress={openAttachmentSheet}
+              accessibilityRole="button"
+              accessibilityLabel="Открыть вложения"
+            >
+              <PaperclipIcon />
+            </Pressable>
+          ) : null}
+
+          <TextInput
+            style={styles.input}
+            placeholder={placeholder}
+            placeholderTextColor={colors.placeholder}
+            value={inputText}
+            onChangeText={handleInputChange}
+            multiline
+            maxLength={4096}
+          />
+
+          {canSend ? (
+            <Pressable
+              style={({ pressed }) => [styles.trailingAction, pressed && styles.trailingActionPressed]}
+              onPress={handleSend}
+              accessibilityRole="button"
+              accessibilityLabel="Отправить сообщение"
+            >
+              <SendIcon />
+            </Pressable>
+          ) : (
+            <GestureDetector gesture={voiceGesture}>
+              <Pressable
+                style={({ pressed }) => [styles.trailingAction, pressed && styles.trailingActionPressed]}
+                accessibilityRole="button"
+                accessibilityLabel="Записать голосовое сообщение"
+              >
+                <MicIcon />
+              </Pressable>
+            </GestureDetector>
+          )}
+        </View>
+      </View>
+
+      <Modal
+        visible={showAttachmentSheet}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowAttachmentSheet(false)}
       >
-        <Text
-          style={[
-            styles.sendText,
-            !inputText.trim() && styles.sendTextDisabled,
-          ]}
-        >
-          Send
-        </Text>
-      </Pressable>
+        <View style={styles.sheetRoot}>
+          <Pressable style={styles.sheetBackdrop} onPress={() => setShowAttachmentSheet(false)} />
+          <View style={styles.sheetCard}>
+            <View style={styles.sheetHandle} />
+
+            <View style={styles.sheetHeader}>
+              <Text style={styles.sheetTitle}>Недавние</Text>
+              {galleryItems.length > 0 ? (
+                <Text style={styles.sheetSubtitle}>Нажми на фото, чтобы добавить в сообщение</Text>
+              ) : null}
+            </View>
+
+            {onSendImage ? (
+              galleryLoading ? (
+                <View style={styles.galleryPlaceholder}>
+                  <Text style={styles.galleryHint}>Загружаем фото...</Text>
+                </View>
+              ) : galleryDenied ? (
+                <View style={styles.galleryPlaceholder}>
+                  <Text style={styles.galleryHint}>Нужен доступ к фото, чтобы показать галерею.</Text>
+                </View>
+              ) : galleryItems.length > 0 ? (
+                <View style={styles.galleryPanel}>
+                  <ScrollView
+                    style={styles.galleryScroll}
+                    contentContainerStyle={styles.galleryGrid}
+                    showsVerticalScrollIndicator={false}
+                  >
+                    {galleryItems.map((item) => (
+                      <Pressable
+                        key={item.id}
+                        style={styles.galleryCell}
+                        onPress={() => handlePickGalleryItem(item)}
+                      >
+                        <Image source={{ uri: item.uri }} style={styles.galleryImage} />
+                      </Pressable>
+                    ))}
+                  </ScrollView>
+                </View>
+              ) : (
+                <View style={styles.galleryPlaceholder}>
+                  <Text style={styles.galleryHint}>Фото не найдены.</Text>
+                </View>
+              )
+            ) : null}
+
+            {attachmentActions.length > 0 ? (
+              <>
+                <Text style={styles.sheetSectionTitle}>Ещё</Text>
+                <View style={styles.sheetActionsRow}>
+                  {attachmentActions.map((action) => (
+                    <Pressable
+                      key={action.key}
+                      style={styles.sheetAction}
+                      onPress={() => runAttachmentAction(action.onPress)}
+                    >
+                      <View style={styles.sheetIconWrap}>
+                        <SheetActionIcon tone={action.tone} />
+                      </View>
+                      <Text style={styles.sheetActionLabel}>{action.title}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
+
       {onSendVideoNote != null && (
         <VideoNoteRecorder
           visible={showVideoNoteRecorder}
@@ -206,62 +396,221 @@ export function InputBar({
           onCancel={handleVideoNoteCancel}
         />
       )}
-    </View>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
   inputRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.separator,
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 10,
     backgroundColor: colors.chatBackground,
   },
-  iconButton: {
-    width: MIN_TAP_TARGET,
-    height: MIN_TAP_TARGET,
-    borderRadius: MIN_TAP_TARGET / 2,
-    backgroundColor: colors.buttonBackground,
+  previewCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E3E8EF',
+    borderRadius: 18,
+    padding: 10,
+    marginBottom: 8,
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  previewImage: {
+    width: 56,
+    height: 56,
+    borderRadius: 14,
+    backgroundColor: '#EEF2F7',
+  },
+  previewTextWrap: {
+    flex: 1,
+    marginLeft: 10,
+    marginRight: 8,
+  },
+  previewTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  previewSubtitle: {
+    marginTop: 2,
+    fontSize: 12,
+    color: '#6B7280',
+  },
+  previewRemoveButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F8FAFD',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E6EBF2',
   },
-  iconText: {
-    fontSize: 22,
-    color: colors.textPrimary,
+  composerShell: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    minHeight: 54,
+    borderRadius: 27,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E3E8EF',
+    paddingLeft: 4,
+    paddingRight: 6,
+    paddingVertical: 4,
+    gap: 6,
+  },
+  leadingAction: {
+    width: MIN_TAP_TARGET,
+    height: MIN_TAP_TARGET,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   input: {
     flex: 1,
     minHeight: MIN_TAP_TARGET,
     maxHeight: 120,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    backgroundColor: colors.inputBackground,
-    borderRadius: 20,
+    paddingHorizontal: 8,
+    paddingTop: 11,
+    paddingBottom: 10,
     fontSize: typography.messageText,
     lineHeight: typography.messageTextLineHeight,
     color: colors.textPrimary,
   },
-  sendButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    minHeight: MIN_TAP_TARGET,
+  trailingAction: {
+    width: MIN_TAP_TARGET,
+    height: MIN_TAP_TARGET,
+    borderRadius: MIN_TAP_TARGET / 2,
+    alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.accent,
-    borderRadius: 20,
+    backgroundColor: 'transparent',
   },
-  sendButtonDisabled: {
-    backgroundColor: colors.disabled,
+  trailingActionPressed: {
+    opacity: 0.82,
   },
-  sendText: {
-    fontSize: 16,
+  sheetRoot: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  sheetBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(17, 24, 39, 0.18)',
+  },
+  sheetCard: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingTop: 10,
+    paddingBottom: 22,
+    paddingHorizontal: 16,
+    maxHeight: '76%',
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: -6 },
+    elevation: 8,
+  },
+  sheetHandle: {
+    alignSelf: 'center',
+    width: 38,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: '#D6DCE5',
+    marginBottom: 14,
+  },
+  sheetHeader: {
+    marginBottom: 12,
+    paddingHorizontal: 4,
+  },
+  sheetTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  sheetSubtitle: {
+    marginTop: 4,
+    fontSize: 13,
+    color: '#6B7280',
+  },
+  galleryPanel: {
+    borderRadius: 22,
+    backgroundColor: '#F8FAFD',
+    borderWidth: 1,
+    borderColor: '#E6EBF2',
+    padding: 8,
+  },
+  galleryScroll: {
+    maxHeight: 292,
+  },
+  galleryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    paddingBottom: 4,
+  },
+  galleryCell: {
+    width: '31.5%',
+    aspectRatio: 1,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: '#EEF2F7',
+  },
+  galleryImage: {
+    width: '100%',
+    height: '100%',
+  },
+  galleryPlaceholder: {
+    minHeight: 132,
+    borderRadius: 22,
+    backgroundColor: '#F8FAFD',
+    borderWidth: 1,
+    borderColor: '#E6EBF2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+  },
+  galleryHint: {
+    fontSize: 14,
+    color: '#6B7280',
+    textAlign: 'center',
+  },
+  sheetSectionTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#374151',
+    marginTop: 12,
+    marginBottom: 8,
+    paddingHorizontal: 4,
+  },
+  sheetActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  sheetAction: {
+    alignItems: 'center',
+    width: 68,
+  },
+  sheetIconWrap: {
+    width: 50,
+    height: 50,
+    borderRadius: 16,
+    backgroundColor: '#F8FAFD',
+    borderWidth: 1,
+    borderColor: '#E6EBF2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+  },
+  sheetActionLabel: {
+    fontSize: 12,
+    color: '#4B5563',
     fontWeight: '600',
-    color: '#fff',
-  },
-  sendTextDisabled: {
-    color: colors.placeholder,
+    textAlign: 'center',
   },
 });

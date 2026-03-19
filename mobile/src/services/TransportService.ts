@@ -268,7 +268,7 @@ class TransportServiceClass {
    */
   async sendImageMessage(
     chatId: string,
-    payload: { uri: string; width?: number; height?: number; fileName?: string; mimeType?: string },
+    payload: { uri: string; width?: number; height?: number; fileName?: string; mimeType?: string; caption?: string },
     tempId: string
   ): Promise<void> {
     const imageMime = payload.mimeType ?? ((payload.fileName?.toLowerCase() ?? '').endsWith('.png') ? 'image/png' : 'image/jpeg');
@@ -283,7 +283,7 @@ class TransportServiceClass {
         const fullUrl = `${getUploadBaseUrl()}${result.url.startsWith('/') ? '' : '/'}${result.url}`;
         WebSocketService.sendEvent('send_message', {
           chat_id: chatId,
-          content: fullUrl,
+          content: payload.caption ?? null,
           msg_type: 'image',
           media: {
             url: fullUrl,
@@ -302,6 +302,7 @@ class TransportServiceClass {
             height: payload.height,
             fileName: payload.fileName,
             mimeType: payload.mimeType,
+            caption: payload.caption,
             tempId,
           },
           tempId
@@ -320,6 +321,7 @@ class TransportServiceClass {
         height: payload.height,
         fileName: payload.fileName,
         mimeType: payload.mimeType,
+        caption: payload.caption,
         tempId,
       },
       tempId

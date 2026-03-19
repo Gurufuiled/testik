@@ -1,8 +1,3 @@
-/**
- * ImageBubble - Image message bubble with optional fullscreen viewer.
- * Matches VoiceBubble/VideoNoteBubble styling patterns (bubbleMe, bubbleOther).
- */
-
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   Image,
@@ -12,16 +7,27 @@ import {
   Text,
   View,
 } from 'react-native';
-import { colors, bubbleRadius } from '../theme/colors';
+import { colors, bubbleRadius, typography } from '../theme/colors';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const MAX_SIZE = 240;
+
+const STATUS_ICONS: Record<string, string> = {
+  sending: '\u23F1',
+  sent: '\u2713',
+  delivered: '\u2713\u2713',
+  read: '\u2713\u2713',
+  failed: '\u26A0',
+};
 
 export interface ImageBubbleProps {
   uri: string;
   isMe: boolean;
   width?: number;
   height?: number;
+  caption?: string;
+  time?: string;
+  status?: string;
 }
 
 function computeDisplaySize(
@@ -39,7 +45,15 @@ function computeDisplaySize(
   };
 }
 
-export function ImageBubble({ uri, isMe, width: propWidth, height: propHeight }: ImageBubbleProps) {
+export function ImageBubble({
+  uri,
+  isMe,
+  width: propWidth,
+  height: propHeight,
+  caption,
+  time,
+  status,
+}: ImageBubbleProps) {
   const [displaySize, setDisplaySize] = useState<{ width: number; height: number } | null>(null);
   const [fullscreenVisible, setFullscreenVisible] = useState(false);
   const insets = useSafeAreaInsets();
@@ -50,8 +64,7 @@ export function ImageBubble({ uri, isMe, width: propWidth, height: propHeight }:
       return;
     }
     if (propWidth != null && propHeight != null) {
-      const size = computeDisplaySize(propWidth, propHeight);
-      setDisplaySize(size);
+      setDisplaySize(computeDisplaySize(propWidth, propHeight));
       return;
     }
     let cancelled = false;
@@ -83,6 +96,8 @@ export function ImageBubble({ uri, isMe, width: propWidth, height: propHeight }:
 
   const w = displaySize?.width ?? MAX_SIZE;
   const h = displaySize?.height ?? MAX_SIZE;
+  const hasCaption = (caption ?? '').trim().length > 0;
+  const statusIcon = isMe ? STATUS_ICONS[status ?? ''] ?? STATUS_ICONS.sending : null;
 
   return (
     <>
@@ -98,7 +113,18 @@ export function ImageBubble({ uri, isMe, width: propWidth, height: propHeight }:
             style={[styles.image, { width: w, height: h }]}
             resizeMode="cover"
           />
+
+          {(time || statusIcon) ? (
+            <View style={styles.overlayMeta}>
+              {time ? <Text style={styles.overlayTime}>{time}</Text> : null}
+              {statusIcon ? <Text style={styles.overlayStatus}>{statusIcon}</Text> : null}
+            </View>
+          ) : null}
         </Pressable>
+
+        {hasCaption ? (
+          <Text style={[styles.caption, isMe && styles.captionMe]}>{caption}</Text>
+        ) : null}
       </View>
 
       <Modal
@@ -121,7 +147,7 @@ export function ImageBubble({ uri, isMe, width: propWidth, height: propHeight }:
               accessibilityRole="button"
               accessibilityLabel="Close fullscreen"
             >
-              <Text style={styles.closeButtonText}>✕</Text>
+              <Text style={styles.closeButtonText}>x</Text>
             </Pressable>
           </View>
         </Pressable>
@@ -132,9 +158,9 @@ export function ImageBubble({ uri, isMe, width: propWidth, height: propHeight }:
 
 const styles = StyleSheet.create({
   container: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    maxWidth: '80%',
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    maxWidth: '82%',
     alignSelf: 'flex-start',
   },
   bubbleMe: {
@@ -147,11 +173,45 @@ const styles = StyleSheet.create({
   },
   imageWrapper: {
     overflow: 'hidden',
-    borderRadius: 8,
+    borderRadius: 14,
+    position: 'relative',
   },
   image: {
     maxWidth: MAX_SIZE,
     maxHeight: MAX_SIZE,
+  },
+  overlayMeta: {
+    position: 'absolute',
+    right: 8,
+    bottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+  },
+  overlayTime: {
+    fontSize: typography.timeStatus,
+    color: '#FFFFFF',
+    fontWeight: '600',
+  },
+  overlayStatus: {
+    fontSize: typography.timeStatus,
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  caption: {
+    marginTop: 6,
+    paddingHorizontal: 4,
+    paddingBottom: 2,
+    fontSize: 14,
+    lineHeight: 19,
+    color: '#111827',
+  },
+  captionMe: {
+    color: '#FFFFFF',
   },
   fullscreenBackdrop: {
     flex: 1,

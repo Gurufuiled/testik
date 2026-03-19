@@ -121,6 +121,74 @@ index ee57b55..3ef12f2 100644
              children: /*#__PURE__*/_jsx(DeprecatedNavigationInChildContext.Provider, {
                value: navigationInChildEnabled,
                children: /*#__PURE__*/_jsx(EnsureSingleNavigator, {
+diff --git a/node_modules/@react-navigation/core/lib/module/PreventRemoveProvider.js b/node_modules/@react-navigation/core/lib/module/PreventRemoveProvider.js
+index 1d4942d..8fe9c0d 100644
+--- a/node_modules/@react-navigation/core/lib/module/PreventRemoveProvider.js
++++ b/node_modules/@react-navigation/core/lib/module/PreventRemoveProvider.js
+@@ -17,7 +17,7 @@ const transformPreventedRoutes = preventedRoutesMap => {
+     preventRemove
+   }) => {
+     acc[routeKey] = {
+-      preventRemove: acc[routeKey]?.preventRemove || preventRemove
++      preventRemove: (acc[routeKey] ? acc[routeKey].preventRemove : undefined) || preventRemove
+     };
+     return acc;
+   }, {});
+@@ -36,14 +36,15 @@ export function PreventRemoveProvider({
+   const route = React.useContext(NavigationRouteContext);
+   const preventRemoveContextValue = React.useContext(PreventRemoveContext);
+   // take `setPreventRemove` from parent context - if exist it means we're in a nested context
+-  const setParentPrevented = preventRemoveContextValue?.setPreventRemove;
++  const setParentPrevented = preventRemoveContextValue ? preventRemoveContextValue.setPreventRemove : undefined;
+   const setPreventRemove = useLatestCallback((id, routeKey, preventRemove) => {
+-    if (preventRemove && (navigation == null || navigation?.getState().routes.every(route => route.key !== routeKey))) {
++    if (preventRemove && (navigation == null || navigation.getState().routes.every(route => route.key !== routeKey))) {
+       throw new Error(`Couldn't find a route with the key ${routeKey}. Is your component inside NavigationContent?`);
+     }
+     setPreventedRoutesMap(prevPrevented => {
+       // values haven't changed - do nothing
+-      if (routeKey === prevPrevented.get(id)?.routeKey && preventRemove === prevPrevented.get(id)?.preventRemove) {
++      const previous = prevPrevented.get(id);
++      if (routeKey === (previous ? previous.routeKey : undefined) && preventRemove === (previous ? previous.preventRemove : undefined)) {
+         return prevPrevented;
+       }
+       const nextPrevented = new Map(prevPrevented);
+@@ -61,17 +62,18 @@ export function PreventRemoveProvider({
+   const isPrevented = [...preventedRoutesMap.values()].some(({
+     preventRemove
+   }) => preventRemove);
++  const routeKey = route ? route.key : undefined;
+   React.useEffect(() => {
+-    if (route?.key !== undefined && setParentPrevented !== undefined) {
++    if (routeKey !== undefined && setParentPrevented !== undefined) {
+       // when route is defined (and setParentPrevented) it means we're in a nested stack
+       // route.key then will be the route key of parent
+-      setParentPrevented(parentId, route.key, isPrevented);
++      setParentPrevented(parentId, routeKey, isPrevented);
+       return () => {
+-        setParentPrevented(parentId, route.key, false);
++        setParentPrevented(parentId, routeKey, false);
+       };
+     }
+     return;
+-  }, [parentId, isPrevented, route?.key, setParentPrevented]);
++  }, [parentId, isPrevented, routeKey, setParentPrevented]);
+   const value = React.useMemo(() => ({
+     setPreventRemove,
+     preventedRoutes: transformPreventedRoutes(preventedRoutesMap)
+diff --git a/node_modules/@react-navigation/core/lib/module/SceneView.js b/node_modules/@react-navigation/core/lib/module/SceneView.js
+index d5abea9..666e05d 100644
+--- a/node_modules/@react-navigation/core/lib/module/SceneView.js
++++ b/node_modules/@react-navigation/core/lib/module/SceneView.js
+@@ -81,7 +81,7 @@ export function SceneView({
+ 
+     // Add our state to the innermost route of the parent state
+     const addState = parent => {
+-      const parentRoute = parent?.routes[0];
++      const parentRoute = parent ? parent.routes[0] : undefined;
+       if (parentRoute) {
+         return {
+           routes: [{
 diff --git a/node_modules/@react-navigation/core/lib/module/StaticNavigation.js b/node_modules/@react-navigation/core/lib/module/StaticNavigation.js
 index e20d571..d9c6bfb 100644
 --- a/node_modules/@react-navigation/core/lib/module/StaticNavigation.js
@@ -139,6 +207,150 @@ index e20d571..d9c6bfb 100644
          });
        }
      }
+diff --git a/node_modules/@react-navigation/core/lib/module/checkDuplicateRouteNames.js b/node_modules/@react-navigation/core/lib/module/checkDuplicateRouteNames.js
+index 30be94d..d0cc8f6 100644
+--- a/node_modules/@react-navigation/core/lib/module/checkDuplicateRouteNames.js
++++ b/node_modules/@react-navigation/core/lib/module/checkDuplicateRouteNames.js
+@@ -5,11 +5,14 @@ export function checkDuplicateRouteNames(state) {
+   const getRouteNames = (location, state) => {
+     state.routes.forEach(route => {
+       const currentLocation = location ? `${location} > ${route.name}` : route.name;
+-      route.state?.routeNames?.forEach(routeName => {
+-        if (routeName === route.name) {
+-          duplicates.push([currentLocation, `${currentLocation} > ${route.name}`]);
+-        }
+-      });
++      const nestedRouteNames = route.state && route.state.routeNames ? route.state.routeNames : undefined;
++      if (nestedRouteNames) {
++        nestedRouteNames.forEach(routeName => {
++          if (routeName === route.name) {
++            duplicates.push([currentLocation, `${currentLocation} > ${route.name}`]);
++          }
++        });
++      }
+       if (route.state) {
+         getRouteNames(currentLocation, route.state);
+       }
+diff --git a/node_modules/@react-navigation/core/lib/module/deepFreeze.js b/node_modules/@react-navigation/core/lib/module/deepFreeze.js
+index f5afb5c..c6e9e9f 100644
+--- a/node_modules/@react-navigation/core/lib/module/deepFreeze.js
++++ b/node_modules/@react-navigation/core/lib/module/deepFreeze.js
+@@ -23,7 +23,8 @@ export const deepFreeze = object => {
+   for (const key in object) {
+     // Don't freeze objects in params since they are passed by the user
+     if (key !== 'params') {
+-      if (Object.getOwnPropertyDescriptor(object, key)?.configurable) {
++      const descriptor = Object.getOwnPropertyDescriptor(object, key);
++      if (descriptor && descriptor.configurable) {
+         const value = object[key];
+         deepFreeze(value);
+       }
+diff --git a/node_modules/@react-navigation/core/lib/module/findFocusedRoute.js b/node_modules/@react-navigation/core/lib/module/findFocusedRoute.js
+index 0468c4e..3394905 100644
+--- a/node_modules/@react-navigation/core/lib/module/findFocusedRoute.js
++++ b/node_modules/@react-navigation/core/lib/module/findFocusedRoute.js
+@@ -2,10 +2,15 @@
+ 
+ export function findFocusedRoute(state) {
+   let current = state;
+-  while (current?.routes[current.index ?? 0].state != null) {
+-    current = current.routes[current.index ?? 0].state;
++  while (current) {
++    const currentIndex = current.index != null ? current.index : 0;
++    const currentRoute = current.routes[currentIndex];
++    if (currentRoute == null || currentRoute.state == null) {
++      break;
++    }
++    current = currentRoute.state;
+   }
+-  const route = current?.routes[current?.index ?? 0];
++  const route = current ? current.routes[current.index != null ? current.index : 0] : undefined;
+   return route;
+ }
+ //# sourceMappingURL=findFocusedRoute.js.map
+diff --git a/node_modules/@react-navigation/core/lib/module/getActionFromState.js b/node_modules/@react-navigation/core/lib/module/getActionFromState.js
+index 3fde1ba..5e46649 100644
+--- a/node_modules/@react-navigation/core/lib/module/getActionFromState.js
++++ b/node_modules/@react-navigation/core/lib/module/getActionFromState.js
+@@ -7,15 +7,15 @@ export function getActionFromState(state, options) {
+   if (routes.length === 0) {
+     return undefined;
+   }
+-  if (!(routes.length === 1 && routes[0].key === undefined || routes.length === 2 && routes[0].key === undefined && routes[0].name === normalizedConfig?.initialRouteName && routes[1].key === undefined)) {
++  if (!(routes.length === 1 && routes[0].key === undefined || routes.length === 2 && routes[0].key === undefined && routes[0].name === normalizedConfig.initialRouteName && routes[1].key === undefined)) {
+     return {
+       type: 'RESET',
+       payload: state
+     };
+   }
+-  const route = state.routes[state.index ?? state.routes.length - 1];
+-  let current = route?.state;
+-  let config = normalizedConfig?.screens?.[route?.name];
++  const route = state.routes[state.index != null ? state.index : state.routes.length - 1];
++  let current = route ? route.state : undefined;
++  let config = normalizedConfig.screens && route ? normalizedConfig.screens[route.name] : undefined;
+   let params = {
+     ...route.params
+   };
+@@ -39,7 +39,7 @@ export function getActionFromState(state, options) {
+   // There are 2 ways we can detect if a screen contains a navigator:
+   // - The route contains nested state in `route.state`
+   // - Nested screens are defined in the config
+-  if (payload && config?.screens && Object.keys(config.screens).length) {
++  if (payload && config && config.screens && Object.keys(config.screens).length) {
+     payload.pop = true;
+   }
+   while (current) {
+@@ -59,7 +59,7 @@ export function getActionFromState(state, options) {
+     if (routes.length === 1 && routes[0].key === undefined) {
+       params.initial = true;
+       params.screen = route.name;
+-    } else if (routes.length === 2 && routes[0].key === undefined && routes[0].name === config?.initialRouteName && routes[1].key === undefined) {
++    } else if (routes.length === 2 && routes[0].key === undefined && routes[0].name === (config ? config.initialRouteName : undefined) && routes[1].key === undefined) {
+       params.initial = false;
+       params.screen = route.name;
+     } else {
+@@ -77,12 +77,12 @@ export function getActionFromState(state, options) {
+       params.params = route.params;
+     }
+     current = route.state;
+-    config = config?.screens?.[route.name];
+-    if (config?.screens && Object.keys(config.screens).length) {
++    config = config && config.screens ? config.screens[route.name] : undefined;
++    if (config && config.screens && Object.keys(config.screens).length) {
+       params.pop = true;
+     }
+   }
+-  if (payload?.params.screen || payload?.params.state) {
++  if (payload && payload.params && (payload.params.screen || payload.params.state)) {
+     payload.pop = true;
+   }
+   if (!payload) {
+diff --git a/node_modules/@react-navigation/core/lib/module/getFocusedRouteNameFromRoute.js b/node_modules/@react-navigation/core/lib/module/getFocusedRouteNameFromRoute.js
+index d6f69bf..93e9096 100644
+--- a/node_modules/@react-navigation/core/lib/module/getFocusedRouteNameFromRoute.js
++++ b/node_modules/@react-navigation/core/lib/module/getFocusedRouteNameFromRoute.js
+@@ -3,16 +3,17 @@
+ import { CHILD_STATE } from "./useRouteCache.js";
+ export function getFocusedRouteNameFromRoute(route) {
+   // @ts-expect-error: this isn't in type definitions coz we want this private
+-  const state = route[CHILD_STATE] ?? route.state;
++  const state = route[CHILD_STATE] != null ? route[CHILD_STATE] : route.state;
+   const params = route.params;
++  const routeIndex = state ? state.index != null ? state.index : typeof state.type === 'string' && state.type !== 'stack' ? 0 : state.routes.length - 1 : undefined;
+   const routeName = state ?
+   // Get the currently active route name in the nested navigator
+   state.routes[
+   // If we have a partial state without index, for tab/drawer, first screen will be focused one, and last for stack
+   // The type property will only exist for rehydrated state and not for state from deep link
+-  state.index ?? (typeof state.type === 'string' && state.type !== 'stack' ? 0 : state.routes.length - 1)].name :
++  routeIndex].name :
+   // If state doesn't exist, we need to default to `screen` param if available
+-  typeof params?.screen === 'string' ? params.screen : undefined;
++  params && typeof params.screen === 'string' ? params.screen : undefined;
+   return routeName;
+ }
+ //# sourceMappingURL=getFocusedRouteNameFromRoute.js.map
 diff --git a/node_modules/@react-navigation/core/lib/module/getPathFromState.js b/node_modules/@react-navigation/core/lib/module/getPathFromState.js
 index ef4e3af..e1bf481 100644
 --- a/node_modules/@react-navigation/core/lib/module/getPathFromState.js
@@ -335,6 +547,118 @@ index 7132844..1605bb9 100644
        throw new Error(`Screen '${screen}' doesn't specify a 'path'. A 'path' needs to be specified in order to use 'alias'.`);
      }
      if (config.screens) {
+diff --git a/node_modules/@react-navigation/core/lib/module/useDescriptors.js b/node_modules/@react-navigation/core/lib/module/useDescriptors.js
+index 7f57f2c..80c8d93 100644
+--- a/node_modules/@react-navigation/core/lib/module/useDescriptors.js
++++ b/node_modules/@react-navigation/core/lib/module/useDescriptors.js
+@@ -100,11 +100,11 @@ export function useDescriptors({
+     });
+     const layout =
+     // The `layout` prop passed to `Screen` elements,
+-    screen.layout ??
++    (screen.layout != null ? screen.layout :
+     // The `screenLayout` props passed to `Group` elements
+-    config.layout ??
++    config.layout != null ? config.layout :
+     // The default `screenLayout` passed to the navigator
+-    screenLayout;
++    screenLayout);
+     let element = /*#__PURE__*/_jsx(SceneView, {
+       navigation: navigation,
+       route: route,
+diff --git a/node_modules/@react-navigation/core/lib/module/useEventEmitter.js b/node_modules/@react-navigation/core/lib/module/useEventEmitter.js
+index 3a68aad..cb8e56d 100644
+--- a/node_modules/@react-navigation/core/lib/module/useEventEmitter.js
++++ b/node_modules/@react-navigation/core/lib/module/useEventEmitter.js
+@@ -48,7 +48,7 @@ export function useEventEmitter(listen) {
+     const items = listeners.current[type] || {};
+ 
+     // Copy the current list of callbacks in case they are mutated during execution
+-    const callbacks = target !== undefined ? items[target]?.slice() : [].concat(...Object.keys(items).map(t => items[t])).filter((cb, i, self) => self.lastIndexOf(cb) === i);
++    const callbacks = target !== undefined ? (items[target] ? items[target].slice() : undefined) : [].concat(...Object.keys(items).map(t => items[t])).filter((cb, i, self) => self.lastIndexOf(cb) === i);
+     const event = {
+       get type() {
+         return type;
+@@ -87,8 +87,12 @@ export function useEventEmitter(listen) {
+         }
+       });
+     }
+-    listenRef.current?.(event);
+-    callbacks?.forEach(cb => cb(event));
++    if (listenRef.current) {
++      listenRef.current(event);
++    }
++    if (callbacks) {
++      callbacks.forEach(cb => cb(event));
++    }
+     return event;
+   }, []);
+   return React.useMemo(() => ({
+diff --git a/node_modules/@react-navigation/core/lib/module/useFocusEvents.js b/node_modules/@react-navigation/core/lib/module/useFocusEvents.js
+index 70670e6..c8a0475 100644
+--- a/node_modules/@react-navigation/core/lib/module/useFocusEvents.js
++++ b/node_modules/@react-navigation/core/lib/module/useFocusEvents.js
+@@ -15,20 +15,20 @@ export function useFocusEvents({
+ 
+   // When the parent screen changes its focus state, we also need to change child's focus
+   // Coz the child screen can't be focused if the parent screen is out of focus
+-  React.useEffect(() => navigation?.addListener('focus', () => {
++  React.useEffect(() => navigation ? navigation.addListener('focus', () => {
+     lastFocusedKeyRef.current = currentFocusedKey;
+     emitter.emit({
+       type: 'focus',
+       target: currentFocusedKey
+     });
+-  }), [currentFocusedKey, emitter, navigation]);
+-  React.useEffect(() => navigation?.addListener('blur', () => {
++  }) : undefined, [currentFocusedKey, emitter, navigation]);
++  React.useEffect(() => navigation ? navigation.addListener('blur', () => {
+     lastFocusedKeyRef.current = undefined;
+     emitter.emit({
+       type: 'blur',
+       target: currentFocusedKey
+     });
+-  }), [currentFocusedKey, emitter, navigation]);
++  }) : undefined, [currentFocusedKey, emitter, navigation]);
+   React.useEffect(() => {
+     const lastFocusedKey = lastFocusedKeyRef.current;
+     lastFocusedKeyRef.current = currentFocusedKey;
+diff --git a/node_modules/@react-navigation/core/lib/module/useFocusedListenersChildrenAdapter.js b/node_modules/@react-navigation/core/lib/module/useFocusedListenersChildrenAdapter.js
+index a38889f..c31357b 100644
+--- a/node_modules/@react-navigation/core/lib/module/useFocusedListenersChildrenAdapter.js
++++ b/node_modules/@react-navigation/core/lib/module/useFocusedListenersChildrenAdapter.js
+@@ -37,6 +37,6 @@ export function useFocusedListenersChildrenAdapter({
+       };
+     }
+   }, [focusedListeners, navigation]);
+-  React.useEffect(() => addListener?.('focus', listener), [addListener, listener]);
++  React.useEffect(() => addListener ? addListener('focus', listener) : undefined, [addListener, listener]);
+ }
+ //# sourceMappingURL=useFocusedListenersChildrenAdapter.js.map
+diff --git a/node_modules/@react-navigation/core/lib/module/useIsFocused.js b/node_modules/@react-navigation/core/lib/module/useIsFocused.js
+index 029edfe..cb34a9f 100644
+--- a/node_modules/@react-navigation/core/lib/module/useIsFocused.js
++++ b/node_modules/@react-navigation/core/lib/module/useIsFocused.js
+@@ -30,6 +30,6 @@ export function useIsFocused() {
+   // isFocused from context only works with NavigationProvider
+   // So this is kept for backward compatibility
+   const value = React.useSyncExternalStore(subscribe, navigation.isFocused, navigation.isFocused);
+-  return isFocused ?? value;
++  return isFocused != null ? isFocused : value;
+ }
+ //# sourceMappingURL=useIsFocused.js.map
+diff --git a/node_modules/@react-navigation/core/lib/module/useNavigation.js b/node_modules/@react-navigation/core/lib/module/useNavigation.js
+index ee7916d..a0cfa04 100644
+--- a/node_modules/@react-navigation/core/lib/module/useNavigation.js
++++ b/node_modules/@react-navigation/core/lib/module/useNavigation.js
+@@ -16,6 +16,6 @@ export function useNavigation() {
+   }
+ 
+   // FIXME: Figure out a better way to do this
+-  return navigation ?? root;
++  return navigation != null ? navigation : root;
+ }
+ //# sourceMappingURL=useNavigation.js.map
 diff --git a/node_modules/@react-navigation/core/lib/module/useNavigationBuilder.js b/node_modules/@react-navigation/core/lib/module/useNavigationBuilder.js
 index cd5e325..7ca270d 100644
 --- a/node_modules/@react-navigation/core/lib/module/useNavigationBuilder.js
@@ -510,6 +834,111 @@ index cd5e325..7ca270d 100644
    });
    const navigation = useNavigationHelpers({
      id: options.id,
+diff --git a/node_modules/@react-navigation/core/lib/module/useNavigationHelpers.js b/node_modules/@react-navigation/core/lib/module/useNavigationHelpers.js
+index f697f9d..8172003 100644
+--- a/node_modules/@react-navigation/core/lib/module/useNavigationHelpers.js
++++ b/node_modules/@react-navigation/core/lib/module/useNavigationHelpers.js
+@@ -26,7 +26,9 @@ export function useNavigationHelpers({
+       const action = typeof op === 'function' ? op(getState()) : op;
+       const handled = onAction(action);
+       if (!handled) {
+-        onUnhandledAction?.(action);
++        if (onUnhandledAction) {
++          onUnhandledAction(action);
++        }
+       }
+     };
+     const actions = {
+@@ -46,11 +48,12 @@ export function useNavigationHelpers({
+       isFocused: parentNavigationHelpers ? parentNavigationHelpers.isFocused : () => true,
+       canGoBack: () => {
+         const state = getState();
++        const parentCanGoBack = parentNavigationHelpers ? parentNavigationHelpers.canGoBack() : false;
+         return router.getStateForAction(state, CommonActions.goBack(), {
+           routeNames: state.routeNames,
+           routeParamList: {},
+           routeGetIdList: {}
+-        }) !== null || parentNavigationHelpers?.canGoBack() || false;
++        }) !== null || parentCanGoBack || false;
+       },
+       getId: () => navigatorId,
+       getParent: id => {
+diff --git a/node_modules/@react-navigation/core/lib/module/useOnAction.js b/node_modules/@react-navigation/core/lib/module/useOnAction.js
+index 7589ba4..3f3f175 100644
+--- a/node_modules/@react-navigation/core/lib/module/useOnAction.js
++++ b/node_modules/@react-navigation/core/lib/module/useOnAction.js
+@@ -94,7 +94,7 @@ export function useOnAction({
+     emitter,
+     beforeRemoveListeners
+   });
+-  React.useEffect(() => addListenerParent?.('action', onAction), [addListenerParent, onAction]);
++  React.useEffect(() => addListenerParent ? addListenerParent('action', onAction) : undefined, [addListenerParent, onAction]);
+   return onAction;
+ }
+ //# sourceMappingURL=useOnAction.js.map
+diff --git a/node_modules/@react-navigation/core/lib/module/useOnGetState.js b/node_modules/@react-navigation/core/lib/module/useOnGetState.js
+index 4218f27..27e1c80 100644
+--- a/node_modules/@react-navigation/core/lib/module/useOnGetState.js
++++ b/node_modules/@react-navigation/core/lib/module/useOnGetState.js
+@@ -18,7 +18,8 @@ export function useOnGetState({
+ 
+     // Avoid returning new route objects if we don't need to
+     const routes = state.routes.map(route => {
+-      const childState = getStateListeners[route.key]?.();
++      const listener = getStateListeners[route.key];
++      const childState = listener ? listener() : undefined;
+       if (route.state === childState) {
+         return route;
+       }
+@@ -36,7 +37,7 @@ export function useOnGetState({
+     };
+   }, [getState, getStateListeners]);
+   React.useEffect(() => {
+-    return addKeyedListener?.('getState', key, getRehydratedState);
++    return addKeyedListener ? addKeyedListener('getState', key, getRehydratedState) : undefined;
+   }, [addKeyedListener, getRehydratedState, key]);
+ }
+ //# sourceMappingURL=useOnGetState.js.map
+diff --git a/node_modules/@react-navigation/core/lib/module/useOnPreventRemove.js b/node_modules/@react-navigation/core/lib/module/useOnPreventRemove.js
+index 5f6044e..43d6a37 100644
+--- a/node_modules/@react-navigation/core/lib/module/useOnPreventRemove.js
++++ b/node_modules/@react-navigation/core/lib/module/useOnPreventRemove.js
+@@ -11,7 +11,7 @@ export const shouldPreventRemove = (emitter, beforeRemoveListeners, currentRoute
+   const removedRoutes = currentRoutes.filter(route => !nextRouteKeys.includes(route.key)).reverse();
+   const visitedRouteKeys =
+   // @ts-expect-error: add this property to mark that we've already emitted this action
+-  action[VISITED_ROUTE_KEYS] ?? new Set();
++  action[VISITED_ROUTE_KEYS] != null ? action[VISITED_ROUTE_KEYS] : new Set();
+   const beforeRemoveAction = {
+     ...action,
+     [VISITED_ROUTE_KEYS]: visitedRouteKeys
+@@ -23,7 +23,8 @@ export const shouldPreventRemove = (emitter, beforeRemoveListeners, currentRoute
+     }
+ 
+     // First, we need to check if any child screens want to prevent it
+-    const isPrevented = beforeRemoveListeners[route.key]?.(beforeRemoveAction);
++    const listener = beforeRemoveListeners[route.key];
++    const isPrevented = listener ? listener(beforeRemoveAction) : undefined;
+     if (isPrevented) {
+       return true;
+     }
+@@ -51,13 +52,13 @@ export function useOnPreventRemove({
+     addKeyedListener
+   } = React.useContext(NavigationBuilderContext);
+   const route = React.useContext(NavigationRouteContext);
+-  const routeKey = route?.key;
++  const routeKey = route ? route.key : undefined;
+   React.useEffect(() => {
+     if (routeKey) {
+-      return addKeyedListener?.('beforeRemove', routeKey, action => {
++      return addKeyedListener ? addKeyedListener('beforeRemove', routeKey, action => {
+         const state = getState();
+         return shouldPreventRemove(emitter, beforeRemoveListeners, state.routes, [], action);
+-      });
++      }) : undefined;
+     }
+   }, [addKeyedListener, beforeRemoveListeners, emitter, getState, routeKey]);
+ }
 diff --git a/node_modules/@react-navigation/core/lib/module/useOptionsGetters.js b/node_modules/@react-navigation/core/lib/module/useOptionsGetters.js
 index 091f4de..bc86ebf 100644
 --- a/node_modules/@react-navigation/core/lib/module/useOptionsGetters.js
@@ -559,6 +988,18 @@ index 091f4de..bc86ebf 100644
    }, [getCurrentOptions, parentAddOptionsGetter, key]);
    const addOptionsGetter = React.useCallback((key, getter) => {
      optionsGettersFromChildRef.current[key] = getter;
+diff --git a/node_modules/@react-navigation/core/lib/module/usePreventRemove.js b/node_modules/@react-navigation/core/lib/module/usePreventRemove.js
+index 51d9444..994203d 100644
+--- a/node_modules/@react-navigation/core/lib/module/usePreventRemove.js
++++ b/node_modules/@react-navigation/core/lib/module/usePreventRemove.js
+@@ -37,6 +37,6 @@ export function usePreventRemove(preventRemove, callback) {
+       data: e.data
+     });
+   });
+-  React.useEffect(() => navigation?.addListener('beforeRemove', beforeRemoveListener), [navigation, beforeRemoveListener]);
++  React.useEffect(() => navigation ? navigation.addListener('beforeRemove', beforeRemoveListener) : undefined, [navigation, beforeRemoveListener]);
+ }
+ //# sourceMappingURL=usePreventRemove.js.map
 diff --git a/node_modules/@react-navigation/core/lib/module/validatePathConfig.js b/node_modules/@react-navigation/core/lib/module/validatePathConfig.js
 index 1af1990..3d80e92 100644
 --- a/node_modules/@react-navigation/core/lib/module/validatePathConfig.js

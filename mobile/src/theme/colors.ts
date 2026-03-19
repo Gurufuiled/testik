@@ -3,18 +3,18 @@
  */
 
 export const colors = {
-  textPrimary: '#000',
-  textSecondary: '#666',
+  textPrimary: '#111827',
+  textSecondary: '#6b7280',
   textSecondaryMuted: 'rgba(255,255,255,0.8)',
   placeholder: '#999',
-  accent: '#007AFF',
+  accent: '#4D8DFF',
   disabled: '#ccc',
-  separator: '#e0e0e0',
-  chatBackground: '#f5f5f5',
-  inputBackground: '#e8e8e8',
-  buttonBackground: '#e0e0e0',
-  header: '#007AFF',
-  bubbleMe: '#007AFF',
+  separator: '#d8e0ea',
+  chatBackground: '#f6f8fb',
+  inputBackground: '#eef2f7',
+  buttonBackground: '#e6ebf2',
+  header: '#eaf3ff',
+  bubbleMe: '#4D8DFF',
   bubbleOther: '#e5e5ea',
   placeholderBg: '#e0e0e0',
 };

@@ -1,7 +1,9 @@
-import React, { useCallback, useEffect, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import {
   FlatList,
-  KeyboardAvoidingView,
+  Keyboard,
+  KeyboardEvent,
+  LayoutChangeEvent,
   Platform,
   StyleSheet,
   Text,
@@ -14,7 +16,7 @@ import { messageStore } from '../stores/messageStore';
 import { TransportService } from '../services/TransportService';
 import { SyncService } from '../services/SyncService';
 import { InputBar } from '../components/InputBar';
-import { MessageTimeStatus, VoiceBubble } from '../components';
+import { ImageBubble, MessageTimeStatus, VoiceBubble } from '../components';
 import type { Message } from '../stores/types';
 
 type ChatRoute = RouteProp<ChatsStackParamList, 'Chat'>;
@@ -30,6 +32,8 @@ export function ChatScreen() {
   const route = useRoute<ChatRoute>();
   const { chatId } = route.params;
   const currentUserId = authStore((s) => s.user?.id ?? null);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [inputBarHeight, setInputBarHeight] = useState(82);
   // useSyncExternalStore ensures UI updates when store changes (real-time messages)
   const messages = useSyncExternalStore(
     (onStoreChange) => messageStore.subscribe(onStoreChange),
@@ -47,6 +51,27 @@ export function ChatScreen() {
       SyncService.fetchMessagesForChat(chatId).catch(() => {});
     }
   }, [chatId]);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const handleKeyboardShow = (event: KeyboardEvent) => {
+      setKeyboardHeight(event.endCoordinates.height);
+    };
+
+    const handleKeyboardHide = () => {
+      setKeyboardHeight(0);
+    };
+
+    const showSubscription = Keyboard.addListener(showEvent, handleKeyboardShow);
+    const hideSubscription = Keyboard.addListener(hideEvent, handleKeyboardHide);
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
 
   const handleSendText = useCallback(
     (text: string) => {
@@ -103,65 +128,173 @@ export function ChatScreen() {
     [chatId, currentUserId]
   );
 
+  const handleSendImage = useCallback(
+    async (result: { uri: string; width?: number; height?: number; caption?: string }) => {
+      if (!currentUserId) return;
+      const tempId = `temp-${Date.now()}`;
+      const msg: Message = {
+        id: tempId,
+        chat_id: chatId,
+        sender_id: currentUserId,
+        msg_type: 'image',
+        content: result.caption ?? null,
+        reply_to_id: null,
+        is_edited: 0,
+        is_deleted: 0,
+        status: 'sending',
+        transport: 'ws',
+        server_id: null,
+        created_at: Date.now(),
+        updated_at: Date.now(),
+        media: [
+          {
+            remote_url: result.uri,
+            width: result.width,
+            height: result.height,
+          },
+        ],
+      };
+      messageStore.getState().prependMessage(chatId, msg);
+      await TransportService.sendImageMessage(
+        chatId,
+        {
+          uri: result.uri,
+          width: result.width,
+          height: result.height,
+          caption: result.caption,
+        },
+        tempId
+      );
+    },
+    [chatId, currentUserId]
+  );
+
+  const handleSendFile = useCallback(
+    async (result: { uri: string; name: string; size: number; mimeType?: string }) => {
+      if (!currentUserId) return;
+      const tempId = `temp-${Date.now()}`;
+      await TransportService.sendFileMessage(
+        chatId,
+        {
+          uri: result.uri,
+          name: result.name,
+          size: result.size,
+          mimeType: result.mimeType,
+        },
+        tempId
+      );
+    },
+    [chatId, currentUserId]
+  );
+
   // messages from store: [newest, ..., oldest] (prependMessage adds at front; API returns desc)
   // inverted FlatList: first item at bottom, data[0] = newest
   const listData = messages;
 
+  const handleInputBarLayout = useCallback((event: LayoutChangeEvent) => {
+    const nextHeight = Math.ceil(event.nativeEvent.layout.height);
+    if (nextHeight > 0 && nextHeight !== inputBarHeight) {
+      setInputBarHeight(nextHeight);
+    }
+  }, [inputBarHeight]);
+
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={90}
-    >
-      <FlatList
-        key={`${chatId}-${messages.length}`}
-        data={listData}
-        keyExtractor={(m) => m.id}
-        inverted
-        extraData={messages.length}
-        renderItem={({ item }) => {
-          const isMe = item.sender_id === currentUserId;
-          if (item.msg_type === 'text') {
-            const rawContent = item.content ?? '';
-            const displayContent = rawContent.trim() || ' ';
-            if (__DEV__ && !rawContent.trim()) {
-              console.log('[ChatScreen] empty content for msg', item.id, 'content type:', typeof item.content);
-            }
-            return (
-              <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleOther]}>
-                <Text style={[styles.textContent, isMe && styles.textContentMe]}>
-                  {displayContent}
-                </Text>
-                <View style={styles.timeRow}>
-                  <MessageTimeStatus
-                    time={formatTime(item.created_at)}
-                    status={item.status}
-                    isMe={isMe}
-                  />
+    <View style={styles.container}>
+      <View style={styles.listWrap}>
+        <FlatList
+          key={`${chatId}-${messages.length}`}
+          data={listData}
+          keyExtractor={(m) => m.id}
+          inverted
+          extraData={messages.length}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={[
+            styles.listContent,
+            { paddingTop: keyboardHeight + inputBarHeight + 8 },
+          ]}
+          renderItem={({ item }) => {
+            const isMe = item.sender_id === currentUserId;
+            if (item.msg_type === 'text') {
+              const rawContent = item.content ?? '';
+              const displayContent = rawContent.trim() || ' ';
+              if (__DEV__ && !rawContent.trim()) {
+                console.log('[ChatScreen] empty content for msg', item.id, 'content type:', typeof item.content);
+              }
+              return (
+                <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleOther]}>
+                  <Text style={[styles.textContent, isMe && styles.textContentMe]}>
+                    {displayContent}
+                  </Text>
+                  <View style={styles.timeRow}>
+                    <MessageTimeStatus
+                      time={formatTime(item.created_at)}
+                      status={item.status}
+                      isMe={isMe}
+                    />
+                  </View>
                 </View>
-              </View>
-            );
-          }
-          if (item.msg_type === 'voice' && item.media?.[0]) {
-            return (
-              <VoiceBubble
-                uri={item.media[0].remote_url ?? 'file://' + item.id}
-                waveform={item.media[0].waveform ?? []}
-                durationMs={item.media[0].duration_ms ?? 0}
-                isMe={isMe}
-              />
-            );
-          }
-          return null;
-        }}
-      />
-      <InputBar onSendText={handleSendText} onSendVoice={handleSendVoice} />
-    </KeyboardAvoidingView>
+              );
+            }
+            if (item.msg_type === 'voice' && item.media?.[0]) {
+              return (
+                <VoiceBubble
+                  uri={item.media[0].remote_url ?? 'file://' + item.id}
+                  waveform={item.media[0].waveform ?? []}
+                  durationMs={item.media[0].duration_ms ?? 0}
+                  isMe={isMe}
+                />
+              );
+            }
+            if (item.msg_type === 'image') {
+              const media = item.media?.[0];
+              const imageUri = media?.remote_url ?? item.content ?? '';
+
+              if (!imageUri.trim()) return null;
+
+              return (
+                <ImageBubble
+                  uri={imageUri}
+                  isMe={isMe}
+                  width={media?.width}
+                  height={media?.height}
+                  caption={item.content ?? undefined}
+                  time={formatTime(item.created_at)}
+                  status={item.status}
+                />
+              );
+            }
+            return null;
+          }}
+        />
+      </View>
+      <View
+        onLayout={handleInputBarLayout}
+        style={[styles.inputBarWrap, { bottom: keyboardHeight }]}
+      >
+        <InputBar
+          onSendText={handleSendText}
+          onSendVoice={handleSendVoice}
+          onSendImage={handleSendImage}
+          onSendFile={handleSendFile}
+        />
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
+  listWrap: {
+    flex: 1,
+  },
+  listContent: {
+    paddingBottom: 8,
+  },
+  inputBarWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+  },
   bubble: {
     marginHorizontal: 12,
     marginVertical: 4,
