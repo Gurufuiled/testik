@@ -116,7 +116,11 @@ export function ChatScreen() {
         server_id: null,
         created_at: Date.now(),
         updated_at: Date.now(),
-        media: [{ waveform: result.waveform, duration_ms: result.durationMs }],
+        media: [{
+          remote_url: result.uri,
+          waveform: result.waveform,
+          duration_ms: result.durationMs,
+        }],
       };
       messageStore.getState().prependMessage(chatId, msg);
       await TransportService.sendVoiceMessage(
@@ -222,14 +226,15 @@ export function ChatScreen() {
               }
               return (
                 <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleOther]}>
-                  <Text style={[styles.textContent, isMe && styles.textContentMe]}>
-                    {displayContent}
-                  </Text>
-                  <View style={styles.timeRow}>
+                  <View style={styles.bubbleContentRow}>
+                    <Text style={[styles.textContent, isMe && styles.textContentMe]}>
+                      {displayContent}
+                    </Text>
                     <MessageTimeStatus
                       time={formatTime(item.created_at)}
                       status={item.status}
                       isMe={isMe}
+                      compact
                     />
                   </View>
                 </View>
@@ -242,6 +247,8 @@ export function ChatScreen() {
                   waveform={item.media[0].waveform ?? []}
                   durationMs={item.media[0].duration_ms ?? 0}
                   isMe={isMe}
+                  time={formatTime(item.created_at)}
+                  status={item.status}
                 />
               );
             }
@@ -298,17 +305,24 @@ const styles = StyleSheet.create({
   bubble: {
     marginHorizontal: 12,
     marginVertical: 4,
-    maxWidth: '80%',
+    maxWidth: '78%',
     alignSelf: 'flex-start',
-    padding: 12,
-    borderRadius: 18,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 16,
   },
   bubbleMe: { alignSelf: 'flex-end', backgroundColor: '#007AFF' },
   bubbleOther: { backgroundColor: '#e5e5ea' },
+  bubbleContentRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 6,
+  },
   textContent: {
     fontSize: 16,
+    lineHeight: 20,
     color: '#000',
+    flexShrink: 1,
   },
   textContentMe: { color: '#fff' },
-  timeRow: { alignSelf: 'flex-end', marginTop: 4 },
 });

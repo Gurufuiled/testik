@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Image,
@@ -13,11 +13,9 @@ import {
 import * as MediaLibrary from 'expo-media-library';
 import Feather from 'expo/node_modules/@expo/vector-icons/Feather';
 import MaterialCommunityIcons from 'expo/node_modules/@expo/vector-icons/MaterialCommunityIcons';
-import { GestureDetector } from 'react-native-gesture-handler';
 import { colors, typography, MIN_TAP_TARGET } from '../theme/colors';
-import { useVoiceRecordGesture } from '../hooks/useVoiceRecordGesture';
 import { DocumentPickerService } from '../services/DocumentPickerService';
-import type { VoiceRecordingResult } from '../services/VoiceRecorderService';
+import { VoiceRecorderService, type VoiceRecordingResult } from '../services/VoiceRecorderService';
 import type { VideoNoteRecordingResult } from '../services/VideoNoteRecorderService';
 import { VideoNoteRecorder } from './VideoNoteRecorder';
 
@@ -95,6 +93,9 @@ export function InputBar({
   const [galleryLoading, setGalleryLoading] = useState(false);
   const [galleryDenied, setGalleryDenied] = useState(false);
   const [pendingImage, setPendingImage] = useState<ImagePickResult | null>(null);
+  const [isVoiceRecording, setIsVoiceRecording] = useState(false);
+  const [voiceElapsedMs, setVoiceElapsedMs] = useState(0);
+  const voiceActionBusyRef = useRef(false);
 
   const hasText = inputText.trim().length > 0;
   const hasPendingImage = pendingImage != null;
@@ -128,10 +129,6 @@ export function InputBar({
     [onInputChange]
   );
 
-  const { gesture: voiceGesture } = useVoiceRecordGesture({
-    onSend: onSendVoice,
-  });
-
   const handleVideoNoteComplete = useCallback(
     async (result: VideoNoteRecordingResult) => {
       setShowVideoNoteRecorder(false);
@@ -143,6 +140,65 @@ export function InputBar({
   const handleVideoNoteCancel = useCallback(() => {
     setShowVideoNoteRecorder(false);
   }, []);
+
+  useEffect(() => {
+    if (!isVoiceRecording) {
+      setVoiceElapsedMs(0);
+      return;
+    }
+
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      setVoiceElapsedMs(Date.now() - startedAt);
+    }, 200);
+
+    return () => clearInterval(timer);
+  }, [isVoiceRecording]);
+
+  useEffect(() => {
+    return () => {
+      if (VoiceRecorderService.isRecording()) {
+        VoiceRecorderService.stopRecording().catch(() => {});
+      }
+    };
+  }, []);
+
+  const handleVoiceButtonPress = useCallback(async () => {
+    if (voiceActionBusyRef.current) return;
+    voiceActionBusyRef.current = true;
+
+    if (isVoiceRecording) {
+      try {
+        const result = await VoiceRecorderService.stopRecording();
+        setIsVoiceRecording(false);
+        setVoiceElapsedMs(0);
+        await onSendVoice(result);
+      } catch (err) {
+        setIsVoiceRecording(false);
+        setVoiceElapsedMs(0);
+        if (__DEV__) console.warn('[InputBar] stop voice recording error:', err);
+        Alert.alert('Ошибка', 'Не удалось сохранить голосовое сообщение.');
+      } finally {
+        voiceActionBusyRef.current = false;
+      }
+      return;
+    }
+
+    try {
+      if (VoiceRecorderService.isRecording()) {
+        voiceActionBusyRef.current = false;
+        return;
+      }
+      await VoiceRecorderService.startRecording();
+      setIsVoiceRecording(true);
+      setVoiceElapsedMs(0);
+    } catch (err) {
+      if (__DEV__) console.warn('[InputBar] start voice recording error:', err);
+      Alert.alert('Ошибка', 'Не удалось начать запись. Проверь доступ к микрофону.');
+    } finally {
+      voiceActionBusyRef.current = false;
+    }
+  }, [isVoiceRecording, onSendVoice]);
 
   const runAttachmentAction = useCallback(async (action: () => Promise<void>) => {
     setShowAttachmentSheet(false);
@@ -249,6 +305,22 @@ export function InputBar({
   return (
     <>
       <View style={styles.inputRow}>
+        {isVoiceRecording ? (
+          <View style={styles.recordingBanner}>
+            <View style={styles.recordingDot} />
+            <Text style={styles.recordingText}>Идёт запись голосового...</Text>
+            <Text style={styles.recordingTime}>
+              {Math.floor(voiceElapsedMs / 60000)
+                .toString()
+                .padStart(2, '0')}
+              :
+              {Math.floor((voiceElapsedMs % 60000) / 1000)
+                .toString()
+                .padStart(2, '0')}
+            </Text>
+          </View>
+        ) : null}
+
         {pendingImage ? (
           <View style={styles.previewCard}>
             <Image source={{ uri: pendingImage.uri }} style={styles.previewImage} />
@@ -301,15 +373,18 @@ export function InputBar({
               <SendIcon />
             </Pressable>
           ) : (
-            <GestureDetector gesture={voiceGesture}>
-              <Pressable
-                style={({ pressed }) => [styles.trailingAction, pressed && styles.trailingActionPressed]}
-                accessibilityRole="button"
-                accessibilityLabel="Записать голосовое сообщение"
-              >
-                <MicIcon />
-              </Pressable>
-            </GestureDetector>
+            <Pressable
+              style={({ pressed }) => [
+                styles.trailingAction,
+                isVoiceRecording && styles.trailingActionRecording,
+                pressed && styles.trailingActionPressed,
+              ]}
+              onPress={handleVoiceButtonPress}
+              accessibilityRole="button"
+              accessibilityLabel={isVoiceRecording ? 'Остановить запись голосового' : 'Записать голосовое сообщение'}
+            >
+              <MicIcon />
+            </Pressable>
           )}
         </View>
       </View>
@@ -422,6 +497,35 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 2,
   },
+  recordingBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E9D5D7',
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 8,
+  },
+  recordingDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#EF4444',
+    marginRight: 8,
+  },
+  recordingText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#111827',
+  },
+  recordingTime: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#EF4444',
+  },
   previewImage: {
     width: 56,
     height: 56,
@@ -493,6 +597,9 @@ const styles = StyleSheet.create({
   },
   trailingActionPressed: {
     opacity: 0.82,
+  },
+  trailingActionRecording: {
+    backgroundColor: '#FEECEE',
   },
   sheetRoot: {
     flex: 1,

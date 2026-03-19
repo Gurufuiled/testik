@@ -15,6 +15,7 @@ interface MessageTimeStatusProps {
   time: string;
   status: string;
   isMe: boolean;
+  compact?: boolean;
 }
 
 /**
@@ -22,13 +23,17 @@ interface MessageTimeStatusProps {
  * For "my" messages (isMe): shows time + status icon (e.g. "10:30 ✓").
  * For "other" messages: shows only time.
  */
-export function MessageTimeStatus({ time, status, isMe }: MessageTimeStatusProps) {
+export function MessageTimeStatus({ time, status, isMe, compact = false }: MessageTimeStatusProps) {
   const icon = isMe ? STATUS_ICONS[status] ?? STATUS_ICONS.sending : null;
 
   return (
-    <View style={styles.container}>
-      <Text style={[styles.time, isMe && styles.timeMe]}>{time}</Text>
-      {icon != null && <Text style={[styles.icon, isMe && styles.iconMe]}>{icon}</Text>}
+    <View style={[styles.container, compact && styles.containerCompact]}>
+      <Text style={[styles.time, isMe && styles.timeMe, compact && styles.timeCompact]}>{time}</Text>
+      {icon != null && (
+        <Text style={[styles.icon, isMe && styles.iconMe, compact && styles.iconCompact]}>
+          {icon}
+        </Text>
+      )}
     </View>
   );
 }
@@ -41,9 +46,16 @@ const styles = StyleSheet.create({
     marginTop: 4,
     gap: 4,
   },
+  containerCompact: {
+    marginTop: 0,
+    gap: 3,
+  },
   time: {
     fontSize: typography.timeStatus,
     color: colors.textSecondary,
+  },
+  timeCompact: {
+    fontSize: 11,
   },
   timeMe: {
     color: colors.textSecondaryMuted,
@@ -51,6 +63,9 @@ const styles = StyleSheet.create({
   icon: {
     fontSize: typography.timeStatus,
     color: colors.textSecondary,
+  },
+  iconCompact: {
+    fontSize: 11,
   },
   iconMe: {
     color: colors.textSecondaryMuted,
