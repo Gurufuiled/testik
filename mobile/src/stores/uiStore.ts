@@ -1,3 +1,4 @@
+import * as SecureStore from 'expo-secure-store';
 import { create } from 'zustand';
 
 export type ConnectionStatus = 'offline' | 'connecting' | 'online';
@@ -13,6 +14,8 @@ type UIState = {
   activeModal: string | null;
   typingUsersByChatId: Record<string, TypingEntry[]>;
   presenceByUserId: Record<string, PresenceEntry>;
+  pinnedMessageIdByChatId: Record<string, string | null>;
+  isPinnedMessagesHydrated: boolean;
 };
 
 type UIActions = {
@@ -24,9 +27,12 @@ type UIActions = {
   setTypingUser: (chatId: string, userId: string) => void;
   clearStaleTyping: (staleMs?: number) => void;
   setPresence: (userId: string, entry: PresenceEntry) => void;
+  setPinnedMessage: (chatId: string, messageId: string | null) => void;
+  hydratePinnedMessages: () => Promise<void>;
 };
 
 const TYPING_STALE_MS = 5000;
+const PINNED_MESSAGES_KEY = 'ui.pinnedMessageIdByChatId';
 
 const initialState: UIState = {
   connectionStatus: 'offline',
@@ -35,6 +41,8 @@ const initialState: UIState = {
   activeModal: null,
   typingUsersByChatId: {},
   presenceByUserId: {},
+  pinnedMessageIdByChatId: {},
+  isPinnedMessagesHydrated: false,
 };
 
 export const uiStore = create<UIState & UIActions>((set) => ({
@@ -80,4 +88,29 @@ export const uiStore = create<UIState & UIActions>((set) => ({
     set((s) => ({
       presenceByUserId: { ...s.presenceByUserId, [userId]: entry },
     })),
+
+  setPinnedMessage: (chatId, messageId) =>
+    set((s) => {
+      const next = {
+        ...s.pinnedMessageIdByChatId,
+        [chatId]: messageId,
+      };
+      void SecureStore.setItemAsync(PINNED_MESSAGES_KEY, JSON.stringify(next)).catch(() => {});
+      return {
+        pinnedMessageIdByChatId: next,
+      };
+    }),
+
+  hydratePinnedMessages: async () => {
+    try {
+      const raw = await SecureStore.getItemAsync(PINNED_MESSAGES_KEY);
+      const parsed = raw ? (JSON.parse(raw) as Record<string, string | null>) : {};
+      set({
+        pinnedMessageIdByChatId: parsed,
+        isPinnedMessagesHydrated: true,
+      });
+    } catch {
+      set({ isPinnedMessagesHydrated: true });
+    }
+  },
 }));

@@ -145,6 +145,10 @@ type PayloadVideoNote = { chatId: string; uri: string; durationMs: number; thumb
 type PayloadImage = { chatId: string; uri: string; width?: number; height?: number; fileName?: string; mimeType?: string; caption?: string; tempId: string; replyToId?: string | null };
 type PayloadFile = { chatId: string; uri: string; name: string; size: number; mimeType?: string; tempId: string; replyToId?: string | null };
 type PayloadDelete = { chatId: string; messageId: string };
+type PayloadForward = {
+  chatId: string;
+  sourceMessage: Message;
+};
 
 async function executeAction(action: string, payload: unknown): Promise<void> {
   const baseUrl = getUploadBaseUrl();
@@ -271,6 +275,78 @@ async function executeAction(action: string, payload: unknown): Promise<void> {
         message_id: p.messageId,
       });
       return;
+    }
+
+    case 'forward_message': {
+      const p = payload as PayloadForward;
+      const message = p.sourceMessage;
+      const media = message.media?.[0];
+      const remoteUrl = media?.remote_url ?? null;
+
+      switch (message.msg_type) {
+        case 'text':
+          WebSocketService.sendEvent('send_message', {
+            chat_id: p.chatId,
+            content: message.content ?? '',
+            msg_type: 'text',
+          });
+          return;
+        case 'image':
+          if (!remoteUrl) throw new Error('Forward image missing remote_url');
+          WebSocketService.sendEvent('send_message', {
+            chat_id: p.chatId,
+            content: message.content ?? null,
+            msg_type: 'image',
+            media: {
+              url: remoteUrl,
+              width: media?.width,
+              height: media?.height,
+            },
+          });
+          return;
+        case 'voice':
+          if (!remoteUrl) throw new Error('Forward voice missing remote_url');
+          WebSocketService.sendEvent('send_message', {
+            chat_id: p.chatId,
+            content: remoteUrl,
+            msg_type: 'voice',
+            media: {
+              url: remoteUrl,
+              duration_ms: media?.duration_ms,
+              waveform: media?.waveform,
+            },
+          });
+          return;
+        case 'video_note':
+          if (!remoteUrl) throw new Error('Forward video note missing remote_url');
+          WebSocketService.sendEvent('send_message', {
+            chat_id: p.chatId,
+            content: remoteUrl,
+            msg_type: 'video_note',
+            media: {
+              url: remoteUrl,
+              duration_ms: media?.duration_ms,
+              thumbnail_url: media?.thumbnail_url,
+              is_round: true,
+            },
+          });
+          return;
+        case 'file':
+          if (!remoteUrl) throw new Error('Forward file missing remote_url');
+          WebSocketService.sendEvent('send_message', {
+            chat_id: p.chatId,
+            content: remoteUrl,
+            msg_type: 'file',
+            media: {
+              url: remoteUrl,
+              file_name: media?.file_name,
+              file_size: media?.file_size,
+            },
+          });
+          return;
+        default:
+          throw new Error(`Forward not supported for ${message.msg_type}`);
+      }
     }
 
     default:

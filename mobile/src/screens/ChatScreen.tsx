@@ -1,8 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import * as Clipboard from 'expo-clipboard';
+import { BlurView } from 'expo-blur';
 import Feather from 'expo/node_modules/@expo/vector-icons/Feather';
 import {
   Alert,
+  Animated,
   Dimensions,
   FlatList,
   ImageBackground,
@@ -12,6 +14,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -21,7 +24,8 @@ import type { ChatsStackParamList } from '../navigation/types';
 import { authStore } from '../stores/authStore';
 import { chatStore } from '../stores/chatStore';
 import { messageStore } from '../stores/messageStore';
-import { TransportService } from '../services/TransportService';
+import { uiStore } from '../stores/uiStore';
+import { canForwardMessage, TransportService } from '../services/TransportService';
 import { SyncService } from '../services/SyncService';
 import {
   FileBubble,
@@ -43,9 +47,17 @@ type MenuState = {
   pageY: number;
 } | null;
 
+type MenuAction = {
+  key: MessageMenuActionKey;
+  label: string;
+  icon: React.ComponentProps<typeof Feather>['name'];
+  color: string;
+  disabled: boolean;
+};
+
 const EMPTY_MESSAGES: Message[] = [];
 const SCREEN_WIDTH = Dimensions.get('window').width;
-const MENU_WIDTH = Math.min(280, SCREEN_WIDTH - 24);
+const MENU_WIDTH = Math.min(238, SCREEN_WIDTH - 24);
 const CHAT_BACKGROUND = require('../../chat/chat-bg.png');
 
 function formatTime(ts: number): string {
@@ -94,15 +106,16 @@ function getCopyableContent(message: Message): string {
 
 function ChatBackgroundPattern() {
   return (
-    <ImageBackground
-      pointerEvents="none"
-      source={CHAT_BACKGROUND}
-      resizeMode="cover"
-      style={styles.backgroundLayer}
-      imageStyle={styles.backgroundImage}
-    >
-      <View style={styles.backgroundTint} />
-    </ImageBackground>
+    <View pointerEvents="none" style={styles.backgroundLayer}>
+      <ImageBackground
+        source={CHAT_BACKGROUND}
+        resizeMode="cover"
+        style={styles.backgroundLayer}
+        imageStyle={styles.backgroundImage}
+      >
+        <View style={styles.backgroundTint} />
+      </ImageBackground>
+    </View>
   );
 }
 
@@ -115,11 +128,18 @@ export function ChatScreen() {
   const [replyToMessageId, setReplyToMessageId] = useState<string | null>(null);
   const [menuState, setMenuState] = useState<MenuState>(null);
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([]);
+  const [forwardSourceMessageId, setForwardSourceMessageId] = useState<string | null>(null);
+  const menuAnim = useRef(new Animated.Value(0)).current;
 
   const messages = useSyncExternalStore(
     (onStoreChange) => messageStore.subscribe(onStoreChange),
     () => messageStore.getState().messagesByChatId[chatId] ?? EMPTY_MESSAGES,
     () => EMPTY_MESSAGES
+  );
+  const chats = useSyncExternalStore(
+    (onStoreChange) => chatStore.subscribe(onStoreChange),
+    () => chatStore.getState().chats,
+    () => []
   );
 
   const messageById = useMemo(() => {
@@ -136,6 +156,18 @@ export function ChatScreen() {
     : null;
   const activeMenuMessage = menuState ? messageById.get(menuState.messageId) ?? null : null;
   const selectionMode = selectedMessageIds.length > 0;
+  const pinnedMessageId = uiStore((s) => s.pinnedMessageIdByChatId[chatId] ?? null);
+  const pinnedMessage = pinnedMessageId ? messageById.get(pinnedMessageId) ?? null : null;
+  const forwardTargets = useMemo(
+    () => chats.filter((chat) => chat.id !== chatId),
+    [chatId, chats]
+  );
+
+  useEffect(() => {
+    if (!uiStore.getState().isPinnedMessagesHydrated) {
+      uiStore.getState().hydratePinnedMessages().catch(() => {});
+    }
+  }, []);
 
   useEffect(() => {
     const existing = messageStore.getState().messagesByChatId[chatId];
@@ -143,6 +175,12 @@ export function ChatScreen() {
       SyncService.fetchMessagesForChat(chatId).catch(() => {});
     }
   }, [chatId]);
+
+  useEffect(() => {
+    if (pinnedMessageId && !messageById.has(pinnedMessageId)) {
+      uiStore.getState().setPinnedMessage(chatId, null);
+    }
+  }, [chatId, messageById, pinnedMessageId]);
 
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -193,8 +231,31 @@ export function ChatScreen() {
   }, []);
 
   const closeMenu = useCallback(() => {
-    setMenuState(null);
-  }, []);
+    Animated.timing(menuAnim, {
+      toValue: 0,
+      duration: 140,
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) {
+        setMenuState(null);
+      }
+    });
+  }, [menuAnim]);
+
+  useEffect(() => {
+    if (!menuState) {
+      menuAnim.setValue(0);
+      return;
+    }
+
+    Animated.spring(menuAnim, {
+      toValue: 1,
+      damping: 18,
+      stiffness: 220,
+      mass: 0.9,
+      useNativeDriver: true,
+    }).start();
+  }, [menuAnim, menuState]);
 
   const handleSendText = useCallback(
     (text: string) => {
@@ -330,14 +391,14 @@ export function ChatScreen() {
   const handleDeleteMessage = useCallback((message: Message) => {
     closeMenu();
     if (message.sender_id !== currentUserId) {
-      Alert.alert('Delete unavailable', 'Right now you can only delete your own messages.');
+      Alert.alert('РЈРґР°Р»РµРЅРёРµ РЅРµРґРѕСЃС‚СѓРїРЅРѕ', 'РЎРµР№С‡Р°СЃ РјРѕР¶РЅРѕ СѓРґР°Р»РёС‚СЊ С‚РѕР»СЊРєРѕ СЃРІРѕРё СЃРѕРѕР±С‰РµРЅРёСЏ.');
       return;
     }
 
-    Alert.alert('Delete message?', 'This will remove the message from the chat.', [
-      { text: 'Cancel', style: 'cancel' },
+    Alert.alert('РЈРґР°Р»РёС‚СЊ СЃРѕРѕР±С‰РµРЅРёРµ?', 'РЎРѕРѕР±С‰РµРЅРёРµ РёСЃС‡РµР·РЅРµС‚ РёР· СЌС‚РѕРіРѕ С‡Р°С‚Р°.', [
+      { text: 'РћС‚РјРµРЅР°', style: 'cancel' },
       {
-        text: 'Delete',
+        text: 'РЈРґР°Р»РёС‚СЊ',
         style: 'destructive',
         onPress: () => {
           messageStore.getState().updateMessage(chatId, message.id, {
@@ -349,6 +410,41 @@ export function ChatScreen() {
       },
     ]);
   }, [chatId, closeMenu, currentUserId]);
+
+  const handlePinToggle = useCallback((message: Message) => {
+    const currentPinned = uiStore.getState().pinnedMessageIdByChatId[chatId] ?? null;
+    uiStore.getState().setPinnedMessage(chatId, currentPinned === message.id ? null : message.id);
+    closeMenu();
+  }, [chatId, closeMenu]);
+
+  const handleForwardMessage = useCallback((message: Message) => {
+    closeMenu();
+    setTimeout(() => {
+      setForwardSourceMessageId(message.id);
+    }, 150);
+  }, [closeMenu]);
+
+  const handleForwardToChat = useCallback((targetChatId: string) => {
+    const source = forwardSourceMessageId ? messageById.get(forwardSourceMessageId) ?? null : null;
+    if (!source) {
+      setForwardSourceMessageId(null);
+      return;
+    }
+
+    const sent = TransportService.forwardMessage(targetChatId, source);
+    setForwardSourceMessageId(null);
+
+    if (!sent) {
+      Alert.alert('РќРµ СѓРґР°Р»РѕСЃСЊ РїРµСЂРµСЃР»Р°С‚СЊ', 'Р­С‚РѕС‚ С‚РёРї СЃРѕРѕР±С‰РµРЅРёСЏ РїРѕРєР° РЅРµР»СЊР·СЏ РїРµСЂРµСЃР»Р°С‚СЊ.');
+      return;
+    }
+
+    const targetChat = chats.find((chat) => chat.id === targetChatId);
+    Alert.alert(
+      'РџРµСЂРµСЃР»Р°РЅРѕ',
+      `РЎРѕРѕР±С‰РµРЅРёРµ РѕС‚РїСЂР°РІР»РµРЅРѕ РІ С‡Р°С‚ В«${targetChat?.peer_display_name || targetChat?.name || 'Р§Р°С‚'}В».`
+    );
+  }, [chats, forwardSourceMessageId, messageById]);
 
   const handleMenuAction = useCallback(async (key: MessageMenuActionKey) => {
     if (!activeMenuMessage) return;
@@ -362,19 +458,17 @@ export function ChatScreen() {
         const value = getCopyableContent(activeMenuMessage);
         closeMenu();
         if (!value) {
-          Alert.alert('Nothing to copy', 'This message has no text to copy.');
+          Alert.alert('РќРµС‡РµРіРѕ РєРѕРїРёСЂРѕРІР°С‚СЊ', 'Р’ СЌС‚РѕРј СЃРѕРѕР±С‰РµРЅРёРё РЅРµС‚ С‚РµРєСЃС‚Р° РґР»СЏ РєРѕРїРёСЂРѕРІР°РЅРёСЏ.');
           return;
         }
         await Clipboard.setStringAsync(value);
         return;
       }
       case 'pin':
-        closeMenu();
-        Alert.alert('Not yet wired', 'Message pinning is not implemented on the backend yet.');
+        handlePinToggle(activeMenuMessage);
         return;
       case 'forward':
-        closeMenu();
-        Alert.alert('Not yet wired', 'Forwarding still needs a destination picker and backend flow.');
+        handleForwardMessage(activeMenuMessage);
         return;
       case 'select':
         toggleSelectedMessage(activeMenuMessage.id);
@@ -384,7 +478,7 @@ export function ChatScreen() {
         handleDeleteMessage(activeMenuMessage);
         return;
     }
-  }, [activeMenuMessage, closeMenu, handleDeleteMessage, toggleSelectedMessage]);
+  }, [activeMenuMessage, closeMenu, handleDeleteMessage, handleForwardMessage, handlePinToggle, toggleSelectedMessage]);
 
   const handleInputBarLayout = useCallback((event: LayoutChangeEvent) => {
     const nextHeight = Math.ceil(event.nativeEvent.layout.height);
@@ -398,10 +492,10 @@ export function ChatScreen() {
     const replied = messageById.get(message.reply_to_id);
     const author = replied
       ? getMessageAuthorName(replied, chatId, currentUserId)
-      : 'Original message';
+      : 'РСЃС…РѕРґРЅРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ';
     const text = replied
       ? buildReplyPreviewText(replied)
-      : 'Original message is unavailable';
+      : 'РСЃС…РѕРґРЅРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ РЅРµРґРѕСЃС‚СѓРїРЅРѕ';
 
     return (
       <ReplyPreview
@@ -525,25 +619,41 @@ export function ChatScreen() {
     return null;
   }, [currentUserId, renderReplySnippet, selectedMessageIds]);
 
-  const menuActions = useMemo(() => {
+  const menuActions = useMemo<MenuAction[]>(() => {
     if (!activeMenuMessage) return [];
 
+    const isPinned = pinnedMessageId === activeMenuMessage.id;
+    const canForward = canForwardMessage(activeMenuMessage);
+
     return [
-      { key: 'reply' as const, label: 'Ответить', icon: 'corner-left-up', color: '#111827' },
-      { key: 'copy' as const, label: 'Скопировать', icon: 'copy', color: '#111827' },
-      { key: 'pin' as const, label: 'Закрепить', icon: 'bookmark', color: '#111827' },
-      { key: 'forward' as const, label: 'Переслать', icon: 'corner-up-right', color: '#111827' },
-      { key: 'delete' as const, label: 'Удалить', icon: 'trash-2', color: '#E53935' },
-      { key: 'select' as const, label: 'Выбрать', icon: 'check-circle', color: '#111827' },
+      { key: 'reply', label: 'Ответить', icon: 'corner-left-up', color: '#111827', disabled: false },
+      { key: 'copy', label: 'Скопировать', icon: 'copy', color: '#111827', disabled: false },
+      { key: 'pin', label: isPinned ? 'Открепить' : 'Закрепить', icon: 'bookmark', color: '#111827', disabled: false },
+      { key: 'forward', label: 'Переслать', icon: 'corner-up-right', color: canForward ? '#111827' : '#9CA3AF', disabled: !canForward },
+      { key: 'delete', label: 'Удалить', icon: 'trash-2', color: '#E53935', disabled: false },
+      { key: 'select', label: 'Выбрать', icon: 'check-circle', color: '#111827', disabled: false },
     ];
-  }, [activeMenuMessage]);
+  }, [activeMenuMessage, pinnedMessageId]);
 
   const menuTop = menuState
-    ? Math.max(16, Math.min(menuState.pageY - 80, 480))
+    ? Math.max(16, Math.min(menuState.pageY + 10, 480))
     : 0;
   const menuLeft = menuState
     ? Math.max(12, Math.min(menuState.pageX - MENU_WIDTH * 0.55, SCREEN_WIDTH - MENU_WIDTH - 12))
     : 12;
+
+  const backdropOpacity = menuAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 1],
+  });
+  const menuTranslateY = menuAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [18, 0],
+  });
+  const menuScale = menuAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.96, 1],
+  });
 
   return (
     <View style={styles.container}>
@@ -551,11 +661,32 @@ export function ChatScreen() {
       {selectionMode ? (
         <View style={styles.selectionBanner}>
           <Text style={styles.selectionBannerText}>
-            Selected: {selectedMessageIds.length}
+            Выбрано: {selectedMessageIds.length}
           </Text>
           <Pressable onPress={() => setSelectedMessageIds([])} hitSlop={10}>
-            <Text style={styles.selectionBannerAction}>Clear</Text>
+            <Text style={styles.selectionBannerAction}>Очистить</Text>
           </Pressable>
+        </View>
+      ) : null}
+
+      {pinnedMessage ? (
+        <View style={styles.pinnedBannerWrap}>
+          <View style={styles.pinnedBanner}>
+            <View style={styles.pinnedAccent} />
+            <View style={styles.pinnedContent}>
+              <Text style={styles.pinnedTitle}>Закрепленное сообщение</Text>
+              <Text numberOfLines={1} style={styles.pinnedText}>
+                {buildReplyPreviewText(pinnedMessage)}
+              </Text>
+            </View>
+            <Pressable
+              hitSlop={10}
+              onPress={() => uiStore.getState().setPinnedMessage(chatId, null)}
+              style={styles.pinnedClose}
+            >
+              <Feather name="x" size={16} color="#65717E" />
+            </Pressable>
+          </View>
         </View>
       ) : null}
 
@@ -565,7 +696,7 @@ export function ChatScreen() {
           data={messages}
           keyExtractor={(m) => m.id}
           inverted
-          extraData={`${messages.length}-${selectedMessageIds.join(',')}-${replyToMessageId ?? ''}`}
+          extraData={`${messages.length}-${selectedMessageIds.join(',')}-${replyToMessageId ?? ''}-${pinnedMessageId ?? ''}`}
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={[
             styles.listContent,
@@ -608,16 +739,32 @@ export function ChatScreen() {
       <Modal
         visible={menuState != null}
         transparent
-        animationType="fade"
+        animationType="none"
         onRequestClose={closeMenu}
       >
         <Pressable style={styles.menuBackdrop} onPress={closeMenu}>
-          <View style={[styles.menuCard, { top: menuTop, left: menuLeft }]}>
+          <Animated.View style={[styles.menuBlurWrap, { opacity: backdropOpacity }]}>
+            <BlurView intensity={72} tint="light" style={styles.menuBackdropBlur} />
+            <View pointerEvents="none" style={styles.menuBackdropHaze} />
+          </Animated.View>
+          <Animated.View
+            style={[
+              styles.menuCard,
+              {
+                top: menuTop,
+                left: menuLeft,
+                opacity: menuAnim,
+                transform: [{ translateY: menuTranslateY }, { scale: menuScale }],
+              },
+            ]}
+          >
             {menuActions.map((action, index) => (
               <Pressable
                 key={action.key}
+                disabled={action.disabled}
                 style={[
                   styles.menuAction,
+                  action.disabled && styles.menuActionDisabled,
                   index < menuActions.length - 1 && styles.menuActionBorder,
                 ]}
                 onPress={() => {
@@ -630,8 +777,50 @@ export function ChatScreen() {
                 <Feather name={action.icon as never} size={20} color={action.color} />
               </Pressable>
             ))}
-          </View>
+          </Animated.View>
         </Pressable>
+      </Modal>
+
+      <Modal
+        visible={forwardSourceMessageId != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setForwardSourceMessageId(null)}
+      >
+        <View style={styles.forwardRoot}>
+          <Pressable style={styles.forwardBackdrop} onPress={() => setForwardSourceMessageId(null)} />
+          <View style={styles.forwardSheet}>
+            <Text style={styles.forwardTitle}>Переслать в...</Text>
+            <ScrollView style={styles.forwardList} showsVerticalScrollIndicator={false}>
+              {forwardTargets.map((chat) => (
+                  <Pressable
+                    key={chat.id}
+                    onPress={() => handleForwardToChat(chat.id)}
+                    style={styles.forwardRow}
+                  >
+                    <View style={styles.forwardAvatar}>
+                      <Text style={styles.forwardAvatarText}>
+                        {(chat.peer_display_name || chat.name || 'Ч')[0]?.toUpperCase() ?? 'Ч'}
+                      </Text>
+                    </View>
+                    <View style={styles.forwardRowText}>
+                      <Text style={styles.forwardChatName}>
+                        {chat.peer_display_name || chat.name || 'Чат'}
+                      </Text>
+                      <Text numberOfLines={1} style={styles.forwardChatMeta}>
+                        {chat.last_message_preview || 'Нажмите, чтобы переслать сюда'}
+                      </Text>
+                    </View>
+                  </Pressable>
+                ))}
+              {forwardTargets.length === 0 ? (
+                <View style={styles.forwardEmpty}>
+                  <Text style={styles.forwardEmptyText}>Пока нет других чатов для пересылки.</Text>
+                </View>
+              ) : null}
+            </ScrollView>
+          </View>
+        </View>
       </Modal>
     </View>
   );
@@ -669,6 +858,49 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: '#F28C28',
+  },
+  pinnedBannerWrap: {
+    paddingHorizontal: 12,
+    paddingTop: 8,
+  },
+  pinnedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderRadius: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(210, 224, 235, 0.9)',
+  },
+  pinnedAccent: {
+    width: 3,
+    alignSelf: 'stretch',
+    borderRadius: 999,
+    backgroundColor: '#4D8DFF',
+    marginRight: 10,
+  },
+  pinnedContent: {
+    flex: 1,
+    minWidth: 0,
+  },
+  pinnedTitle: {
+    fontSize: 12,
+    lineHeight: 15,
+    fontWeight: '700',
+    color: '#4D8DFF',
+  },
+  pinnedText: {
+    marginTop: 2,
+    fontSize: 13,
+    lineHeight: 17,
+    color: '#39414A',
+  },
+  pinnedClose: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   listWrap: {
     flex: 1,
@@ -752,10 +984,20 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'rgba(12, 17, 29, 0.08)',
   },
+  menuBlurWrap: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  menuBackdropBlur: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  menuBackdropHaze: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(248, 252, 255, 0.16)',
+  },
   menuCard: {
     position: 'absolute',
     width: MENU_WIDTH,
-    backgroundColor: 'rgba(255,255,255,0.96)',
+    backgroundColor: 'rgba(255,255,255,0.975)',
     borderRadius: 18,
     overflow: 'hidden',
     shadowColor: '#0F172A',
@@ -765,19 +1007,97 @@ const styles = StyleSheet.create({
     elevation: 12,
   },
   menuAction: {
-    minHeight: 52,
+    minHeight: 45,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
   },
   menuActionBorder: {
     borderBottomWidth: 1,
     borderBottomColor: '#ECEEF2',
   },
+  menuActionDisabled: {
+    opacity: 0.52,
+  },
   menuActionLabel: {
-    fontSize: 17,
-    lineHeight: 22,
+    fontSize: 15,
+    lineHeight: 20,
     fontWeight: '500',
   },
+  forwardRoot: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  forwardBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(12, 17, 29, 0.18)',
+  },
+  forwardSheet: {
+    backgroundColor: 'rgba(255,255,255,0.98)',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 14,
+    paddingHorizontal: 14,
+    paddingBottom: 22,
+    maxHeight: '65%',
+  },
+  forwardTitle: {
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: '700',
+    color: '#17202A',
+    marginBottom: 12,
+  },
+  forwardList: {
+    maxHeight: 360,
+  },
+  forwardEmpty: {
+    paddingVertical: 18,
+    alignItems: 'center',
+  },
+  forwardEmptyText: {
+    fontSize: 14,
+    lineHeight: 18,
+    color: '#6B7280',
+    textAlign: 'center',
+  },
+  forwardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  forwardAvatar: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#D9E8FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  forwardAvatarText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#487FE8',
+  },
+  forwardRowText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  forwardChatName: {
+    fontSize: 15,
+    lineHeight: 19,
+    fontWeight: '600',
+    color: '#17202A',
+  },
+  forwardChatMeta: {
+    marginTop: 2,
+    fontSize: 12,
+    lineHeight: 16,
+    color: '#6B7280',
+  },
 });
+
+
+

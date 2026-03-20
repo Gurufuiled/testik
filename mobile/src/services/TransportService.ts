@@ -43,6 +43,76 @@ function getUploadBaseUrl(): string {
   return API_BASE_URL.replace(/\/api\/?$/, '') || API_BASE_URL;
 }
 
+function buildForwardPayload(message: Message): {
+  content: string | null;
+  msg_type: string;
+  media?: Record<string, unknown>;
+} | null {
+  if (message.is_deleted) return null;
+
+  const media = message.media?.[0];
+  const remoteUrl = media?.remote_url ?? null;
+
+  switch (message.msg_type) {
+    case 'text':
+      return {
+        content: message.content ?? '',
+        msg_type: 'text',
+      };
+    case 'image':
+      if (!remoteUrl) return null;
+      return {
+        content: message.content ?? null,
+        msg_type: 'image',
+        media: {
+          url: remoteUrl,
+          width: media?.width,
+          height: media?.height,
+        },
+      };
+    case 'voice':
+      if (!remoteUrl) return null;
+      return {
+        content: remoteUrl,
+        msg_type: 'voice',
+        media: {
+          url: remoteUrl,
+          duration_ms: media?.duration_ms,
+          waveform: media?.waveform,
+        },
+      };
+    case 'video_note':
+      if (!remoteUrl) return null;
+      return {
+        content: remoteUrl,
+        msg_type: 'video_note',
+        media: {
+          url: remoteUrl,
+          duration_ms: media?.duration_ms,
+          thumbnail_url: media?.thumbnail_url,
+          is_round: true,
+        },
+      };
+    case 'file':
+      if (!remoteUrl) return null;
+      return {
+        content: remoteUrl,
+        msg_type: 'file',
+        media: {
+          url: remoteUrl,
+          file_name: media?.file_name,
+          file_size: media?.file_size,
+        },
+      };
+    default:
+      return null;
+  }
+}
+
+export function canForwardMessage(message: Message): boolean {
+  return buildForwardPayload(message) != null;
+}
+
 type P2PManagerRef = {
   setHandlers: (h: { onPeerConnected?: (id: string) => void; onPeerDisconnected?: (id: string) => void; onData?: (id: string, data: ArrayBuffer) => void }) => void;
   isConnectedToPeer: (id: string) => boolean;
@@ -422,6 +492,29 @@ class TransportServiceClass {
       { chatId, messageId },
       messageId
     );
+  }
+
+  forwardMessage(chatId: string, sourceMessage: Message): boolean {
+    const payload = buildForwardPayload(sourceMessage);
+    if (!payload) return false;
+
+    if (WebSocketService.isConnected()) {
+      WebSocketService.sendEvent('send_message', {
+        chat_id: chatId,
+        content: payload.content,
+        msg_type: payload.msg_type,
+        media: payload.media,
+      });
+      return true;
+    }
+
+    queueToSyncQueue(
+      this.syncQueueDao,
+      'forward_message',
+      { chatId, sourceMessage },
+      sourceMessage.id
+    );
+    return true;
   }
 
   /** Process sync_queue when WebSocket connects. Delegates to SyncService.processSyncQueue(). */
