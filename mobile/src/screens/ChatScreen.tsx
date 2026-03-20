@@ -1,6 +1,6 @@
 ﻿import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import * as Clipboard from 'expo-clipboard';
-import { BlurView } from 'expo-blur';
+import { BlurTargetView, BlurView } from 'expo-blur';
 import Feather from 'expo/node_modules/@expo/vector-icons/Feather';
 import {
   Alert,
@@ -139,6 +139,7 @@ export function ChatScreen() {
   const { chatId } = route.params;
   const currentUserId = authStore((s) => s.user?.id ?? null);
   const listRef = useRef<FlatList<Message> | null>(null);
+  const blurTargetRef = useRef<View | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [inputBarHeight, setInputBarHeight] = useState(82);
   const [replyToMessageId, setReplyToMessageId] = useState<string | null>(null);
@@ -785,102 +786,105 @@ export function ChatScreen() {
 
   return (
     <View style={styles.container}>
-      <ChatBackgroundPattern />
-      {selectionMode ? (
-        <View style={styles.selectionBanner}>
-          <Text style={styles.selectionBannerText}>
-            Выбрано: {selectedMessageIds.length}
-          </Text>
-          <Pressable onPress={() => setSelectedMessageIds([])} hitSlop={10}>
-            <Text style={styles.selectionBannerAction}>Очистить</Text>
-          </Pressable>
-        </View>
-      ) : null}
-
-      {pinnedMessage ? (
-        <View style={styles.pinnedBannerWrap}>
-          <View style={styles.pinnedBanner}>
-            <View style={styles.pinnedAccent} />
-            <Pressable onPress={handlePinnedBannerPress} style={styles.pinnedMainPressable}>
-              <View style={styles.pinnedContent}>
-                <Text style={styles.pinnedTitle}>Закрепленное сообщение</Text>
-                <Text numberOfLines={1} style={styles.pinnedText}>
-                  {buildReplyPreviewText(pinnedMessage)}
-                </Text>
-              </View>
-            </Pressable>
-            <Pressable
-              hitSlop={10}
-              onPress={() => {
-                if (currentChat) {
-                  chatStore.getState().updateChat({
-                    ...currentChat,
-                    pinned_message_id: null,
-                  });
-                }
-                TransportService.pinMessage(chatId, null);
-              }}
-              style={styles.pinnedClose}
-            >
-              <Feather name="x" size={16} color="#65717E" />
+      <BlurTargetView ref={blurTargetRef} collapsable={false} style={styles.chatContentLayer}>
+        <ChatBackgroundPattern />
+        {selectionMode ? (
+          <View style={styles.selectionBanner}>
+            <Text style={styles.selectionBannerText}>
+              Выбрано: {selectedMessageIds.length}
+            </Text>
+            <Pressable onPress={() => setSelectedMessageIds([])} hitSlop={10}>
+              <Text style={styles.selectionBannerAction}>Очистить</Text>
             </Pressable>
           </View>
+        ) : null}
+
+        {pinnedMessage ? (
+          <View style={styles.pinnedBannerWrap}>
+            <View style={styles.pinnedBanner}>
+              <View style={styles.pinnedAccent} />
+              <Pressable onPress={handlePinnedBannerPress} style={styles.pinnedMainPressable}>
+                <View style={styles.pinnedContent}>
+                  <Text style={styles.pinnedTitle}>Закрепленное сообщение</Text>
+                  <Text numberOfLines={1} style={styles.pinnedText}>
+                    {buildReplyPreviewText(pinnedMessage)}
+                  </Text>
+                </View>
+              </Pressable>
+              <Pressable
+                hitSlop={10}
+                onPress={() => {
+                  if (currentChat) {
+                    chatStore.getState().updateChat({
+                      ...currentChat,
+                      pinned_message_id: null,
+                    });
+                  }
+                  TransportService.pinMessage(chatId, null);
+                }}
+                style={styles.pinnedClose}
+              >
+                <Feather name="x" size={16} color="#65717E" />
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
+
+        <View style={styles.listWrap}>
+          <FlatList
+            ref={listRef}
+            key={`${chatId}-${messages.length}`}
+            data={messages}
+            keyExtractor={(m) => m.id}
+            inverted
+            extraData={`${messages.length}-${selectedMessageIds.join(',')}-${replyToMessageId ?? ''}-${pinnedMessageId ?? ''}`}
+            onScrollToIndexFailed={handleScrollToIndexFailed}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={[
+              styles.listContent,
+              { paddingTop: keyboardHeight + inputBarHeight + 8 },
+            ]}
+            renderItem={({ item }) => (
+              <Pressable
+                delayLongPress={220}
+                onPress={() => handleMessagePress(item.id)}
+                onLongPress={() => openMessageMenu(item)}
+                style={styles.messagePressable}
+              >
+                {renderMessageCard(item)}
+              </Pressable>
+            )}
+          />
         </View>
-      ) : null}
 
-      <View style={styles.listWrap}>
-        <FlatList
-          ref={listRef}
-          key={`${chatId}-${messages.length}`}
-          data={messages}
-          keyExtractor={(m) => m.id}
-          inverted
-          extraData={`${messages.length}-${selectedMessageIds.join(',')}-${replyToMessageId ?? ''}-${pinnedMessageId ?? ''}`}
-          onScrollToIndexFailed={handleScrollToIndexFailed}
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={[
-            styles.listContent,
-            { paddingTop: keyboardHeight + inputBarHeight + 8 },
-          ]}
-          renderItem={({ item }) => (
-            <Pressable
-              delayLongPress={220}
-              onPress={() => handleMessagePress(item.id)}
-              onLongPress={() => openMessageMenu(item)}
-              style={styles.messagePressable}
-            >
-              {renderMessageCard(item)}
-            </Pressable>
-          )}
-        />
-      </View>
-
-      <View
-        onLayout={handleInputBarLayout}
-        style={[styles.inputBarWrap, { bottom: keyboardHeight }]}
-      >
-        <InputBar
-          onSendText={handleSendText}
-          onSendVoice={handleSendVoice}
-          onSendImage={handleSendImage}
-          onSendFile={handleSendFile}
-          replyToMessage={replyToMessage}
-          replyAuthorName={replyAuthorName}
-          onCancelReply={clearReplyState}
-        />
-      </View>
+        <View
+          onLayout={handleInputBarLayout}
+          style={[styles.inputBarWrap, { bottom: keyboardHeight }]}
+        >
+          <InputBar
+            onSendText={handleSendText}
+            onSendVoice={handleSendVoice}
+            onSendImage={handleSendImage}
+            onSendFile={handleSendFile}
+            replyToMessage={replyToMessage}
+            replyAuthorName={replyAuthorName}
+            onCancelReply={clearReplyState}
+          />
+        </View>
+      </BlurTargetView>
 
       {menuState ? (
         <View pointerEvents="box-none" style={styles.menuOverlayRoot}>
           <Pressable style={styles.menuBackdrop} onPress={closeMenu}>
             <Animated.View style={[styles.menuBlurWrap, { opacity: backdropOpacity }]}>
               <BlurView
-                intensity={82}
+                intensity={100}
                 tint="default"
-                experimentalBlurMethod="dimezisBlurView"
+                blurMethod="dimezisBlurView"
+                blurReductionFactor={1}
+                blurTarget={blurTargetRef}
                 style={styles.menuBackdropBlur}
               />
-              <View pointerEvents="none" style={styles.menuBackdropTone} />
             </Animated.View>
           </Pressable>
           {activeMenuMessage ? (
@@ -1014,6 +1018,9 @@ export function ChatScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#E8F4D6' },
+  chatContentLayer: {
+    flex: 1,
+  },
   backgroundLayer: {
     ...StyleSheet.absoluteFillObject,
     overflow: 'hidden',
@@ -1187,10 +1194,6 @@ const styles = StyleSheet.create({
   },
   menuBackdropBlur: {
     ...StyleSheet.absoluteFillObject,
-  },
-  menuBackdropTone: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255, 255, 255, 0.015)',
   },
   menuPreviewOverlay: {
     position: 'absolute',
