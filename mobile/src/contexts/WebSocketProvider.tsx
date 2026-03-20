@@ -25,6 +25,7 @@ interface ServerMessagePayload {
   content: string | null;
   msg_type: string;
   status: string;
+  reply_to_id?: string | null;
   created_at: number | string;
   media?: {
     duration_ms?: number | null;
@@ -62,7 +63,7 @@ function mapServerMessageToMessage(payload: ServerMessagePayload): Message {
     sender_id: payload.sender_id,
     msg_type: payload.msg_type,
     content: payload.content,
-    reply_to_id: null,
+    reply_to_id: payload.reply_to_id ?? null,
     is_edited: 0,
     is_deleted: 0,
     status: payload.status,
@@ -220,6 +221,18 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
 
           messageStore.getState().updateMessage(chat_id, message_id, {
             status: status ?? 'sent',
+          });
+        },
+
+        onMessageDeleted: (payload) => {
+          const { chat_id, message_id } = payload as {
+            chat_id?: string;
+            message_id?: string;
+          };
+          if (!chat_id || !message_id) return;
+          messageStore.getState().updateMessage(chat_id, message_id, {
+            is_deleted: 1,
+            content: null,
           });
         },
 

@@ -14,6 +14,7 @@ type WebSocketMessage = {
 export type WebSocketEventHandlers = {
   onNewMessage?: (payload: WebSocketMessage) => void;
   onMessageAck?: (payload: WebSocketMessage) => void;
+  onMessageDeleted?: (payload: WebSocketMessage) => void;
   onTyping?: (payload: WebSocketMessage) => void;
   onPresence?: (payload: WebSocketMessage) => void;
   onError?: (payload: WebSocketMessage) => void;
@@ -111,6 +112,9 @@ class WebSocketServiceClass {
       case 'ack':
       case 'message_ack':
         this.handlers.onMessageAck?.(msg);
+        break;
+      case 'message_deleted':
+        this.handlers.onMessageDeleted?.(msg);
         break;
       case 'typing':
         this.handlers.onTyping?.(msg);

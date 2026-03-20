@@ -2,6 +2,7 @@ import React from 'react';
 import { StyleSheet, View, Text, Pressable } from 'react-native';
 import { useVoicePlayer } from '../contexts/VoicePlayerContext';
 import { colors, bubbleRadius, typography } from '../theme/colors';
+import { buildUiWaveform } from '../services/waveformUtils';
 import { MessageTimeStatus } from './MessageTimeStatus';
 
 export interface VoiceBubbleProps {
@@ -50,8 +51,9 @@ export function VoiceBubble({
     }
   };
 
-  const bars = waveform.length > 0 ? waveform : Array(48).fill(0.5);
-  const barCount = Math.min(bars.length, 48);
+  const bars = buildUiWaveform(waveform.length > 0 ? waveform : Array(48).fill(0.5), 34)
+    .map((value) => Math.min(1, Math.max(0.08, Math.pow(value, 0.72))));
+  const barCount = bars.length;
 
   return (
     <View style={[styles.container, isMe ? styles.bubbleMe : styles.bubbleOther]}>
@@ -124,8 +126,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 10,
     paddingVertical: 8,
-    maxWidth: '82%',
+    marginVertical: 4,
     gap: 10,
+    width: '100%',
   },
   bubbleMe: {
     backgroundColor: colors.bubbleMe,
@@ -166,12 +169,12 @@ const styles = StyleSheet.create({
   waveformContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 2,
+    gap: 3,
     minWidth: 84,
     paddingTop: 2,
   },
   bar: {
-    width: 2,
+    width: 3,
     borderRadius: 1,
     minHeight: 3,
   },

@@ -48,6 +48,7 @@ export class MessagesService {
     msgType: string,
     content: string | null,
     media?: CreateMessageMedia,
+    replyToId?: string | null,
   ): Promise<MappedMessage> {
     const member = await this.prisma.chatMember.findUnique({
       where: { chatId_userId: { chatId, userId: senderId } },
@@ -66,6 +67,7 @@ export class MessagesService {
           senderId,
           msgType: prismaMsgType,
           content,
+          replyToId: replyToId ?? null,
           status: MessageStatus.sent,
           transport: Transport.websocket,
         },
@@ -115,6 +117,48 @@ export class MessagesService {
       include: { media: true },
     });
     return mapMessage(withMedia!, { includeMedia: true });
+  }
+
+  async deleteMessage(chatId: string, messageId: string, userId: string): Promise<MappedMessage> {
+    const existing = await this.prisma.message.findFirst({
+      where: { id: messageId, chatId },
+      include: { media: true },
+    });
+    if (!existing) {
+      throw new ForbiddenException('Message not found');
+    }
+    if (existing.senderId !== userId) {
+      throw new ForbiddenException('Cannot delete another user message');
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const next = await tx.message.update({
+        where: { id: messageId },
+        data: {
+          isDeleted: true,
+          content: null,
+        },
+        include: { media: true },
+      });
+
+      const chat = await tx.chat.findUnique({
+        where: { id: chatId },
+        select: { lastMessageId: true },
+      });
+
+      if (chat?.lastMessageId === messageId) {
+        await tx.chat.update({
+          where: { id: chatId },
+          data: {
+            lastMessagePreview: 'Deleted message',
+          },
+        });
+      }
+
+      return next;
+    });
+
+    return mapMessage(updated, { includeMedia: true });
   }
 
   private toMessageType(msgType: string): MessageType {

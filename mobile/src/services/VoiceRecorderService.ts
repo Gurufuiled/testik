@@ -6,10 +6,11 @@
 import { Audio } from 'expo-av';
 import { Platform } from 'react-native';
 
-import { dbToNormalized } from './waveformUtils';
+import { buildUiWaveform, dbToNormalized } from './waveformUtils';
 
-const WAVEFORM_SAMPLE_COUNT = 50;
-const PROGRESS_INTERVAL_MS = 100;
+const RAW_WAVEFORM_LIMIT = 600;
+const UI_WAVEFORM_SAMPLE_COUNT = 72;
+const PROGRESS_INTERVAL_MS = 60;
 
 export interface VoiceRecordingResult {
   uri: string;
@@ -64,7 +65,7 @@ class VoiceRecorderServiceClass {
     };
 
     const onStatusUpdate = (status: { metering?: number }): void => {
-      if (status.metering != null && this.waveformSamples.length < WAVEFORM_SAMPLE_COUNT) {
+      if (status.metering != null && this.waveformSamples.length < RAW_WAVEFORM_LIMIT) {
         this.waveformSamples.push(dbToNormalized(status.metering));
       }
     };
@@ -96,7 +97,7 @@ class VoiceRecorderServiceClass {
     return {
       uri,
       durationMs: status.durationMillis ?? 0,
-      waveform: this.waveformSamples,
+      waveform: buildUiWaveform(this.waveformSamples, UI_WAVEFORM_SAMPLE_COUNT),
     };
   }
 

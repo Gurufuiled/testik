@@ -17,6 +17,8 @@ import { colors, typography, MIN_TAP_TARGET } from '../theme/colors';
 import { DocumentPickerService } from '../services/DocumentPickerService';
 import { VoiceRecorderService, type VoiceRecordingResult } from '../services/VoiceRecorderService';
 import type { VideoNoteRecordingResult } from '../services/VideoNoteRecorderService';
+import type { Message } from '../stores/types';
+import { ReplyPreview, buildReplyPreviewText } from './ReplyPreview';
 import { VideoNoteRecorder } from './VideoNoteRecorder';
 
 export interface ImagePickResult {
@@ -41,6 +43,9 @@ export interface InputBarProps {
   onSendFile?: (result: FilePickResult) => void | Promise<void>;
   placeholder?: string;
   onInputChange?: (text: string) => void;
+  replyToMessage?: Message | null;
+  replyAuthorName?: string | null;
+  onCancelReply?: () => void;
 }
 
 type AttachmentAction = {
@@ -85,6 +90,9 @@ export function InputBar({
   onSendFile,
   placeholder = 'Сообщение',
   onInputChange,
+  replyToMessage = null,
+  replyAuthorName = null,
+  onCancelReply,
 }: InputBarProps) {
   const [inputText, setInputText] = useState('');
   const [showVideoNoteRecorder, setShowVideoNoteRecorder] = useState(false);
@@ -100,6 +108,7 @@ export function InputBar({
   const hasText = inputText.trim().length > 0;
   const hasPendingImage = pendingImage != null;
   const canSend = hasText || hasPendingImage;
+  const replyPreviewText = buildReplyPreviewText(replyToMessage);
 
   const handleSend = useCallback(() => {
     const content = inputText.trim();
@@ -109,6 +118,7 @@ export function InputBar({
 
     setInputText('');
     setPendingImage(null);
+    onCancelReply?.();
 
     if (selectedImage) {
       void onSendImage?.({
@@ -119,7 +129,7 @@ export function InputBar({
     }
 
     onSendText(content);
-  }, [inputText, onSendImage, onSendText, pendingImage]);
+  }, [inputText, onCancelReply, onSendImage, onSendText, pendingImage]);
 
   const handleInputChange = useCallback(
     (text: string) => {
@@ -341,6 +351,17 @@ export function InputBar({
           </View>
         ) : null}
 
+        {replyToMessage ? (
+          <View style={styles.replyComposerWrap}>
+            <ReplyPreview
+              author={replyAuthorName?.trim() || 'Message'}
+              text={replyPreviewText}
+              mode="composer"
+              onClose={onCancelReply}
+            />
+          </View>
+        ) : null}
+
         <View style={styles.composerShell}>
           {showAttachmentButton ? (
             <Pressable
@@ -480,7 +501,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingTop: 8,
     paddingBottom: 10,
-    backgroundColor: colors.chatBackground,
+    backgroundColor: 'transparent',
   },
   previewCard: {
     flexDirection: 'row',
@@ -556,6 +577,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: '#E6EBF2',
+  },
+  replyComposerWrap: {
+    marginBottom: 8,
   },
   composerShell: {
     flexDirection: 'row',

@@ -1,6 +1,7 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import Feather from 'expo/node_modules/@expo/vector-icons/Feather';
 import { ChatListScreen, ChatScreen } from '../screens';
 import type { ChatsStackParamList } from './types';
 import { resolveAvatarUrl } from '../config';
@@ -52,6 +53,27 @@ function ChatHeaderAvatar({
   );
 }
 
+function ChatHeaderActions({
+  avatarUrl,
+  title,
+}: {
+  avatarUrl: string | null;
+  title: string;
+}) {
+  return (
+    <View style={styles.headerActions}>
+      <Pressable
+        style={({ pressed }) => [styles.callButton, pressed && styles.callButtonPressed]}
+        accessibilityRole="button"
+        accessibilityLabel="Позвонить"
+      >
+        <Feather name="phone" size={16} color={colors.textPrimary} />
+      </Pressable>
+      <ChatHeaderAvatar avatarUrl={avatarUrl} title={title} />
+    </View>
+  );
+}
+
 export function ChatsStack() {
   return (
     <Stack.Navigator
@@ -86,7 +108,7 @@ export function ChatsStack() {
             title,
             headerBackTitle: 'Назад',
             headerTitle: () => <ChatHeaderTitle title={title} subtitle={subtitle} />,
-            headerRight: () => <ChatHeaderAvatar avatarUrl={avatarUrl} title={title} />,
+            headerRight: () => <ChatHeaderActions avatarUrl={avatarUrl} title={title} />,
           };
         }}
       />
@@ -109,6 +131,24 @@ const styles = StyleSheet.create({
     marginTop: 1,
     fontSize: 12,
     color: colors.textSecondary,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  callButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.58)',
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.28)',
+  },
+  callButtonPressed: {
+    opacity: 0.72,
   },
   headerAvatar: {
     width: 34,

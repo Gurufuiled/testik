@@ -16,6 +16,7 @@ type MessageActions = {
     messageId: string,
     updates: Partial<Message>
   ) => void;
+  removeMessage: (chatId: string, messageId: string) => void;
   clearMessages: (chatId: string) => void;
   setLoading: (loading: boolean) => void;
 };
@@ -66,6 +67,17 @@ export const messageStore = create<MessageState & MessageActions>((set) => ({
           [chatId]: messages.map((m) =>
             m.id === messageId ? { ...m, ...updates } : m
           ),
+        },
+      };
+    }),
+
+  removeMessage: (chatId, messageId) =>
+    set((state) => {
+      const messages = state.messagesByChatId[chatId] ?? [];
+      return {
+        messagesByChatId: {
+          ...state.messagesByChatId,
+          [chatId]: messages.filter((m) => m.id !== messageId),
         },
       };
     }),

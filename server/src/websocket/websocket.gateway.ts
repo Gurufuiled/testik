@@ -142,6 +142,7 @@ export class WebsocketGateway
       chat_id?: string;
       content?: string | null;
       msg_type?: string;
+      reply_to_id?: string | null;
       media?: {
         url?: string;
         duration_ms?: number;
@@ -161,7 +162,7 @@ export class WebsocketGateway
       this.logger.warn('send_message: invalid payload');
       return;
     }
-    const { chat_id: chatId, content, msg_type: msgType, media } = payload;
+    const { chat_id: chatId, content, msg_type: msgType, media, reply_to_id: replyToId } = payload;
     if (!chatId) return;
 
     this.logger.log(`send_message received: chatId=${chatId} sender=${client.userId} content=${typeof content === 'string' ? content.slice(0, 50) : content} msgType=${msgType}`);
@@ -182,6 +183,7 @@ export class WebsocketGateway
         effectiveMsgType,
         content ?? null,
         media,
+        replyToId ?? null,
       );
       const members = await this.getChatMemberIds(chatId);
       this.logger.log(`send_message broadcast: msgId=${message.id} content=${message.content?.slice(0, 50)} to ${members.length} members: ${members.join(',')}`);
@@ -192,6 +194,33 @@ export class WebsocketGateway
       members.forEach((uid) => this.sendToUser(uid, data));
     } catch (err) {
       this.logger.warn(`send_message failed: ${err}`);
+    }
+  }
+
+  @SubscribeMessage('delete_message')
+  async handleDeleteMessage(
+    client: AuthenticatedSocket,
+    payload: { chat_id?: string; message_id?: string },
+  ) {
+    if (!client.userId) return;
+    const { chat_id: chatId, message_id: messageId } = payload;
+    if (!chatId || !messageId) return;
+
+    try {
+      const message = await this.messagesService.deleteMessage(
+        chatId,
+        messageId,
+        client.userId,
+      );
+      const members = await this.getChatMemberIds(chatId);
+      const data = JSON.stringify({
+        type: 'message_deleted',
+        chat_id: chatId,
+        message_id: message.id,
+      });
+      members.forEach((uid) => this.sendToUser(uid, data));
+    } catch (err) {
+      this.logger.warn(`delete_message failed: ${err}`);
     }
   }
 

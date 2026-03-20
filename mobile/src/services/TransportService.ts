@@ -100,7 +100,8 @@ class TransportServiceClass {
     chatId: string,
     content: string,
     msgType: string,
-    tempId: string
+    tempId: string,
+    replyToId: string | null = null
   ): void {
     const peerUserId = this.getPeerUserIdForChat(chatId);
 
@@ -121,6 +122,7 @@ class TransportServiceClass {
         chat_id: chatId,
         content,
         msg_type: msgType,
+        reply_to_id: replyToId,
       });
       return;
     }
@@ -129,7 +131,7 @@ class TransportServiceClass {
     queueToSyncQueue(
       this.syncQueueDao,
       'send_message_text',
-      { chatId, content, msgType, tempId },
+      { chatId, content, msgType, tempId, replyToId },
       tempId
     );
   }
@@ -141,7 +143,8 @@ class TransportServiceClass {
   async sendVoiceMessage(
     chatId: string,
     payload: { uri: string; durationMs: number; waveform?: number[] },
-    tempId: string
+    tempId: string,
+    replyToId: string | null = null
   ): Promise<void> {
     if (WebSocketService.isConnected()) {
       try {
@@ -155,6 +158,7 @@ class TransportServiceClass {
           chat_id: chatId,
           content: fullUrl,
           msg_type: 'voice',
+          reply_to_id: replyToId,
           media: {
             url: fullUrl,
             duration_ms: payload.durationMs,
@@ -171,6 +175,7 @@ class TransportServiceClass {
             durationMs: payload.durationMs,
             waveform: payload.waveform ?? [],
             tempId,
+            replyToId,
           },
           tempId
         );
@@ -187,6 +192,7 @@ class TransportServiceClass {
         durationMs: payload.durationMs,
         waveform: payload.waveform ?? [],
         tempId,
+        replyToId,
       },
       tempId
     );
@@ -199,7 +205,8 @@ class TransportServiceClass {
   async sendVideoNoteMessage(
     chatId: string,
     payload: { uri: string; durationMs: number; thumbnailUri?: string },
-    tempId: string
+    tempId: string,
+    replyToId: string | null = null
   ): Promise<void> {
     if (WebSocketService.isConnected()) {
       try {
@@ -224,6 +231,7 @@ class TransportServiceClass {
           chat_id: chatId,
           content: fullUrl,
           msg_type: 'video_note',
+          reply_to_id: replyToId,
           media: {
             url: fullUrl,
             duration_ms: payload.durationMs,
@@ -241,6 +249,7 @@ class TransportServiceClass {
             durationMs: payload.durationMs,
             thumbnailUri: payload.thumbnailUri,
             tempId,
+            replyToId,
           },
           tempId
         );
@@ -257,6 +266,7 @@ class TransportServiceClass {
         durationMs: payload.durationMs,
         thumbnailUri: payload.thumbnailUri,
         tempId,
+        replyToId,
       },
       tempId
     );
@@ -269,7 +279,8 @@ class TransportServiceClass {
   async sendImageMessage(
     chatId: string,
     payload: { uri: string; width?: number; height?: number; fileName?: string; mimeType?: string; caption?: string },
-    tempId: string
+    tempId: string,
+    replyToId: string | null = null
   ): Promise<void> {
     const imageMime = payload.mimeType ?? ((payload.fileName?.toLowerCase() ?? '').endsWith('.png') ? 'image/png' : 'image/jpeg');
     const imageName = payload.fileName ?? (imageMime === 'image/png' ? 'image.png' : 'image.jpg');
@@ -285,6 +296,7 @@ class TransportServiceClass {
           chat_id: chatId,
           content: payload.caption ?? null,
           msg_type: 'image',
+          reply_to_id: replyToId,
           media: {
             url: fullUrl,
             width: payload.width,
@@ -304,6 +316,7 @@ class TransportServiceClass {
             mimeType: payload.mimeType,
             caption: payload.caption,
             tempId,
+            replyToId,
           },
           tempId
         );
@@ -323,6 +336,7 @@ class TransportServiceClass {
         mimeType: payload.mimeType,
         caption: payload.caption,
         tempId,
+        replyToId,
       },
       tempId
     );
@@ -335,7 +349,8 @@ class TransportServiceClass {
   async sendFileMessage(
     chatId: string,
     payload: { uri: string; name: string; size: number; mimeType?: string },
-    tempId: string
+    tempId: string,
+    replyToId: string | null = null
   ): Promise<void> {
     if (WebSocketService.isConnected()) {
       try {
@@ -349,6 +364,7 @@ class TransportServiceClass {
           chat_id: chatId,
           content: fullUrl,
           msg_type: 'file',
+          reply_to_id: replyToId,
           media: {
             url: fullUrl,
             file_name: result.file_name,
@@ -367,6 +383,7 @@ class TransportServiceClass {
             size: payload.size,
             mimeType: payload.mimeType,
             tempId,
+            replyToId,
           },
           tempId
         );
@@ -384,8 +401,26 @@ class TransportServiceClass {
         size: payload.size,
         mimeType: payload.mimeType,
         tempId,
+        replyToId,
       },
       tempId
+    );
+  }
+
+  deleteMessage(chatId: string, messageId: string): void {
+    if (WebSocketService.isConnected()) {
+      WebSocketService.sendEvent('delete_message', {
+        chat_id: chatId,
+        message_id: messageId,
+      });
+      return;
+    }
+
+    queueToSyncQueue(
+      this.syncQueueDao,
+      'delete_message',
+      { chatId, messageId },
+      messageId
     );
   }
 

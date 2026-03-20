@@ -5,7 +5,12 @@
  * Native recording (expo-av) requires device; not tested here.
  */
 
-import { dbToNormalized } from './waveformUtils';
+import {
+  buildUiWaveform,
+  dbToNormalized,
+  resampleWaveform,
+  smoothWaveform,
+} from './waveformUtils';
 
 function assert(cond: boolean, msg: string): void {
   if (!cond) throw new Error(msg);
@@ -46,6 +51,21 @@ function runTests(): void {
   // Linear interpolation
   assertClose(dbToNormalized(-120), 0.25, 1e-5, 'dbToNormalized(-120)');
   assertClose(dbToNormalized(-40), 0.75, 1e-5, 'dbToNormalized(-40)');
+
+  // Resample keeps requested size
+  const resampled = resampleWaveform([0, 0.2, 0.4, 0.6, 0.8, 1], 3);
+  assert(resampled.length === 3, 'resampleWaveform should return target length');
+  assert(resampled.every((v) => v >= 0 && v <= 1), 'resampleWaveform values should stay in 0..1');
+
+  // Smooth reduces harsh central spike
+  const smoothed = smoothWaveform([0, 0, 1, 0, 0], 1);
+  assert(smoothed[2] < 1, 'smoothWaveform should soften a peak');
+  assert(smoothed[2] > smoothed[1], 'smoothed center should remain higher than neighbors');
+
+  // Full UI waveform pipeline returns visible bars
+  const uiWaveform = buildUiWaveform([0, 0.1, 0.4, 0.8, 0.3, 0.05], 8);
+  assert(uiWaveform.length === 8, 'buildUiWaveform should return target length');
+  assert(uiWaveform.every((v) => v >= 0.04 && v <= 1), 'buildUiWaveform should clamp to visible floor');
 
   console.log('VoiceRecorderService dbToNormalized: all tests passed');
 }

@@ -139,11 +139,12 @@ function mapApiMessageToMessage(api: ApiMessage): Message {
   };
 }
 
-type PayloadText = { chatId: string; content: string; msgType: string; tempId: string };
-type PayloadVoice = { chatId: string; uri: string; durationMs: number; waveform?: number[]; tempId: string };
-type PayloadVideoNote = { chatId: string; uri: string; durationMs: number; thumbnailUri?: string; tempId: string };
-type PayloadImage = { chatId: string; uri: string; width?: number; height?: number; fileName?: string; mimeType?: string; caption?: string; tempId: string };
-type PayloadFile = { chatId: string; uri: string; name: string; size: number; mimeType?: string; tempId: string };
+type PayloadText = { chatId: string; content: string; msgType: string; tempId: string; replyToId?: string | null };
+type PayloadVoice = { chatId: string; uri: string; durationMs: number; waveform?: number[]; tempId: string; replyToId?: string | null };
+type PayloadVideoNote = { chatId: string; uri: string; durationMs: number; thumbnailUri?: string; tempId: string; replyToId?: string | null };
+type PayloadImage = { chatId: string; uri: string; width?: number; height?: number; fileName?: string; mimeType?: string; caption?: string; tempId: string; replyToId?: string | null };
+type PayloadFile = { chatId: string; uri: string; name: string; size: number; mimeType?: string; tempId: string; replyToId?: string | null };
+type PayloadDelete = { chatId: string; messageId: string };
 
 async function executeAction(action: string, payload: unknown): Promise<void> {
   const baseUrl = getUploadBaseUrl();
@@ -155,6 +156,7 @@ async function executeAction(action: string, payload: unknown): Promise<void> {
         chat_id: p.chatId,
         content: p.content,
         msg_type: p.msgType ?? 'text',
+        reply_to_id: p.replyToId ?? null,
       });
       return;
     }
@@ -171,6 +173,7 @@ async function executeAction(action: string, payload: unknown): Promise<void> {
         chat_id: p.chatId,
         content: fullUrl,
         msg_type: 'voice',
+        reply_to_id: p.replyToId ?? null,
         media: {
           url: fullUrl,
           duration_ms: p.durationMs,
@@ -203,6 +206,7 @@ async function executeAction(action: string, payload: unknown): Promise<void> {
         chat_id: p.chatId,
         content: fullUrl,
         msg_type: 'video_note',
+        reply_to_id: p.replyToId ?? null,
         media: {
           url: fullUrl,
           duration_ms: p.durationMs,
@@ -227,6 +231,7 @@ async function executeAction(action: string, payload: unknown): Promise<void> {
         chat_id: p.chatId,
         content: p.caption ?? null,
         msg_type: 'image',
+        reply_to_id: p.replyToId ?? null,
         media: {
           url: fullUrl,
           width: p.width,
@@ -248,12 +253,22 @@ async function executeAction(action: string, payload: unknown): Promise<void> {
         chat_id: p.chatId,
         content: fullUrl,
         msg_type: 'file',
+        reply_to_id: p.replyToId ?? null,
         media: {
           url: fullUrl,
           file_name: result.file_name,
           file_size: result.file_size,
           mime_type: result.mime_type,
         },
+      });
+      return;
+    }
+
+    case 'delete_message': {
+      const p = payload as PayloadDelete;
+      WebSocketService.sendEvent('delete_message', {
+        chat_id: p.chatId,
+        message_id: p.messageId,
       });
       return;
     }
