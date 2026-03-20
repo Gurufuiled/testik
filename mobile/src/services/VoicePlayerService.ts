@@ -22,6 +22,7 @@ class VoicePlayerServiceClass {
   private playPromise: Promise<void> = Promise.resolve();
   private statusListeners = new Set<VoicePlayerStatusListener>();
   private voiceCacheDir: string | null = null;
+  private currentUri: string | null = null;
   private lastStatus: VoicePlayerStatus = {
     positionMs: 0,
     durationMs: 0,
@@ -92,6 +93,7 @@ class VoicePlayerServiceClass {
       // Ignore unload errors (e.g. already unloaded)
     }
     this.soundRef = null;
+    this.currentUri = null;
     this.lastStatus = { positionMs: 0, durationMs: 0, isPlaying: false };
     this.notifyListeners();
   }
@@ -129,6 +131,26 @@ class VoicePlayerServiceClass {
     const previous = this.playPromise;
     this.playPromise = (async () => {
       await previous;
+
+      if (this.soundRef && this.currentUri === uri) {
+        const currentStatus = await this.soundRef.getStatusAsync();
+        if (currentStatus.isLoaded) {
+          if (!currentStatus.isPlaying) {
+            await this.soundRef.playAsync();
+            const resumedStatus = await this.soundRef.getStatusAsync();
+            if (resumedStatus.isLoaded) {
+              this.lastStatus = {
+                positionMs: resumedStatus.positionMillis ?? 0,
+                durationMs: resumedStatus.durationMillis ?? 0,
+                isPlaying: resumedStatus.isPlaying ?? false,
+              };
+              this.notifyListeners();
+            }
+          }
+          return;
+        }
+      }
+
       await this.stopAndUnloadCurrent();
       await this.ensureAudioMode();
       const playableUri = await this.resolvePlayableUri(uri);
@@ -144,6 +166,7 @@ class VoicePlayerServiceClass {
       );
 
       this.soundRef = sound;
+      this.currentUri = uri;
       const status = await sound.getStatusAsync();
       if (status.isLoaded) {
         this.lastStatus = {
@@ -172,6 +195,7 @@ class VoicePlayerServiceClass {
       }
     } catch {
       this.soundRef = null;
+      this.currentUri = null;
       this.lastStatus = { positionMs: 0, durationMs: 0, isPlaying: false };
       throw new Error('Failed to pause playback');
     }

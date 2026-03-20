@@ -38,6 +38,15 @@ export function VoicePlayerProvider({ children }: { children: React.ReactNode })
   }, []);
 
   const play = useCallback(async (uri: string) => {
+    setStatus((prev) =>
+      currentVoiceUri === uri
+        ? prev
+        : {
+            positionMs: 0,
+            durationMs: 0,
+            isPlaying: false,
+          }
+    );
     setCurrentVoiceUri(uri);
     try {
       await VoicePlayerService.play(uri);
@@ -45,7 +54,7 @@ export function VoicePlayerProvider({ children }: { children: React.ReactNode })
       setCurrentVoiceUri(null);
       throw err;
     }
-  }, []);
+  }, [currentVoiceUri]);
 
   const pause = useCallback(async () => {
     await VoicePlayerService.pause();

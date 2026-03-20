@@ -12,6 +12,7 @@ type Props = {
 export function AuthStack({ onLogin }: Props) {
   return (
     <Stack.Navigator
+      id={undefined as never}
       screenOptions={{
         headerShown: false,
       }}

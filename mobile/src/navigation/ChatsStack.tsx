@@ -77,6 +77,7 @@ function ChatHeaderActions({
 export function ChatsStack() {
   return (
     <Stack.Navigator
+      id={undefined as never}
       screenOptions={{
         headerShown: true,
         headerStyle: { backgroundColor: colors.header },

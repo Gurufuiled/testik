@@ -42,8 +42,14 @@ type MessageMenuActionKey = 'reply' | 'copy' | 'pin' | 'forward' | 'delete' | 's
 
 type MenuState = {
   messageId: string;
-  pageX: number;
-  pageY: number;
+  isMe: boolean;
+  previewTop: number;
+  previewLeft: number;
+  previewWidth: number;
+  previewHeight: number;
+  menuTop: number;
+  menuLeft: number;
+  placement: 'above' | 'below';
 } | null;
 
 type MenuAction = {
@@ -56,8 +62,18 @@ type MenuAction = {
 
 const EMPTY_MESSAGES: Message[] = [];
 const SCREEN_WIDTH = Dimensions.get('window').width;
-const MENU_WIDTH = Math.min(238, SCREEN_WIDTH - 24);
+const SCREEN_HEIGHT = Dimensions.get('window').height;
+const MENU_WIDTH = Math.min(202, SCREEN_WIDTH - 24);
+const MENU_ITEM_HEIGHT = 39;
+const MENU_HEIGHT = MENU_ITEM_HEIGHT * 6 + 2;
+const MENU_EDGE_GAP = 12;
+const MENU_TO_MESSAGE_GAP = 6;
+const REACTION_BAR_HEIGHT = 40;
+const REACTION_BAR_WIDTH = 248;
+const OVERLAY_TOP_INSET = 86;
+const OVERLAY_BOTTOM_INSET = 110;
 const CHAT_BACKGROUND = require('../../chat/chat-bg.png');
+const MENU_REACTIONS = ['❤️', '👏', '😭', '🥰', '💋', '🤣', '👍'];
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
@@ -130,6 +146,7 @@ export function ChatScreen() {
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([]);
   const [forwardSourceMessageId, setForwardSourceMessageId] = useState<string | null>(null);
   const menuAnim = useRef(new Animated.Value(0)).current;
+  const messageContentRefs = useRef<Record<string, View | null>>({});
 
   const messages = useSyncExternalStore(
     (onStoreChange) => messageStore.subscribe(onStoreChange),
@@ -258,9 +275,67 @@ export function ChatScreen() {
     toggleSelectedMessage(messageId);
   }, [selectionMode, toggleSelectedMessage]);
 
-  const handleMessageLongPress = useCallback((message: Message, pageX: number, pageY: number) => {
-    setMenuState({ messageId: message.id, pageX, pageY });
+  const setMessageContentRef = useCallback((messageId: string, node: View | null) => {
+    if (node) {
+      messageContentRefs.current[messageId] = node;
+      return;
+    }
+
+    delete messageContentRefs.current[messageId];
   }, []);
+
+  const openMessageMenu = useCallback((message: Message) => {
+    const target = messageContentRefs.current[message.id];
+    if (!target) return;
+
+    Keyboard.dismiss();
+
+    target.measureInWindow((pageX, pageY, width, height) => {
+      const previewLeft = Math.max(MENU_EDGE_GAP, Math.min(pageX, SCREEN_WIDTH - width - MENU_EDGE_GAP));
+      const minPreviewTop = OVERLAY_TOP_INSET;
+      const maxPreviewTop = SCREEN_HEIGHT - OVERLAY_BOTTOM_INSET - height;
+      const anchoredTop = Math.max(minPreviewTop, Math.min(pageY, maxPreviewTop));
+      const menuLeftBase = message.sender_id === currentUserId
+        ? previewLeft + width - MENU_WIDTH
+        : previewLeft;
+      const menuLeft = Math.max(
+        MENU_EDGE_GAP,
+        Math.min(menuLeftBase, SCREEN_WIDTH - MENU_WIDTH - MENU_EDGE_GAP)
+      );
+
+      let previewTop = anchoredTop;
+      let menuTop = previewTop + height + MENU_TO_MESSAGE_GAP;
+      let placement: 'above' | 'below' = 'below';
+
+      const bottomLimit = SCREEN_HEIGHT - MENU_EDGE_GAP;
+      const overflowBottom = menuTop + MENU_HEIGHT - bottomLimit;
+
+      if (overflowBottom > 0) {
+        const liftedPreviewTop = Math.max(minPreviewTop, previewTop - overflowBottom);
+        const liftedMenuTop = liftedPreviewTop + height + MENU_TO_MESSAGE_GAP;
+
+        if (liftedMenuTop + MENU_HEIGHT <= bottomLimit) {
+          previewTop = liftedPreviewTop;
+          menuTop = liftedMenuTop;
+        } else {
+          placement = 'above';
+          menuTop = Math.max(MENU_EDGE_GAP, previewTop - MENU_TO_MESSAGE_GAP - MENU_HEIGHT);
+        }
+      }
+
+      setMenuState({
+        messageId: message.id,
+        isMe: message.sender_id === currentUserId,
+        previewTop,
+        previewLeft,
+        previewWidth: width,
+        previewHeight: height,
+        menuTop,
+        menuLeft,
+        placement,
+      });
+    });
+  }, [currentUserId]);
 
   const closeMenu = useCallback(() => {
     Animated.timing(menuAnim, {
@@ -479,14 +554,14 @@ export function ChatScreen() {
     setForwardSourceMessageId(null);
 
     if (!sent) {
-      Alert.alert('РќРµ СѓРґР°Р»РѕСЃСЊ РїРµСЂРµСЃР»Р°С‚СЊ', 'Р­С‚РѕС‚ С‚РёРї СЃРѕРѕР±С‰РµРЅРёСЏ РїРѕРєР° РЅРµР»СЊР·СЏ РїРµСЂРµСЃР»Р°С‚СЊ.');
+      Alert.alert('Не удалось переслать', 'Этот тип сообщения пока нельзя переслать.');
       return;
     }
 
     const targetChat = chats.find((chat) => chat.id === targetChatId);
     Alert.alert(
-      'РџРµСЂРµСЃР»Р°РЅРѕ',
-      `РЎРѕРѕР±С‰РµРЅРёРµ РѕС‚РїСЂР°РІР»РµРЅРѕ РІ С‡Р°С‚ В«${targetChat?.peer_display_name || targetChat?.name || 'Р§Р°С‚'}В».`
+      'Переслано',
+      `Сообщение отправлено в чат «${targetChat?.peer_display_name || targetChat?.name || 'Чат'}».`
     );
   }, [chats, forwardSourceMessageId, messageById]);
 
@@ -502,7 +577,7 @@ export function ChatScreen() {
         const value = getCopyableContent(activeMenuMessage);
         closeMenu();
         if (!value) {
-          Alert.alert('РќРµС‡РµРіРѕ РєРѕРїРёСЂРѕРІР°С‚СЊ', 'Р’ СЌС‚РѕРј СЃРѕРѕР±С‰РµРЅРёРё РЅРµС‚ С‚РµРєСЃС‚Р° РґР»СЏ РєРѕРїРёСЂРѕРІР°РЅРёСЏ.');
+          Alert.alert('Нечего копировать', 'В этом сообщении нет текста для копирования.');
           return;
         }
         await Clipboard.setStringAsync(value);
@@ -536,10 +611,10 @@ export function ChatScreen() {
     const replied = messageById.get(message.reply_to_id);
     const author = replied
       ? getMessageAuthorName(replied, chatId, currentUserId)
-      : 'РСЃС…РѕРґРЅРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ';
+      : 'Исходное сообщение';
     const text = replied
       ? buildReplyPreviewText(replied)
-      : 'РСЃС…РѕРґРЅРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ РЅРµРґРѕСЃС‚СѓРїРЅРѕ';
+      : 'Исходное сообщение недоступно';
 
     return (
       <ReplyPreview
@@ -553,17 +628,41 @@ export function ChatScreen() {
     );
   }, [chatId, currentUserId, messageById]);
 
-  const renderMessageCard = useCallback((item: Message) => {
+  const renderMessageBody = useCallback((item: Message, isSelected: boolean, forcedWidth?: number) => {
     const isMe = item.sender_id === currentUserId;
-    const isSelected = selectedMessageIds.includes(item.id);
     const deleted = item.is_deleted === 1;
+    const fixedWidthStyle = forcedWidth ? { width: forcedWidth, maxWidth: forcedWidth } : null;
 
     if (deleted) {
       return (
-        <View style={[styles.messageWrap, isMe ? styles.messageWrapMe : styles.messageWrapOther]}>
-          <View style={[styles.deletedBubble, isMe ? styles.deletedBubbleMe : styles.deletedBubbleOther, isSelected && styles.selectedBubble]}>
-            <Text style={[styles.deletedText, isMe && styles.deletedTextMe]}>
-              {getDeletedPlaceholder(isMe)}
+        <View style={[styles.deletedBubble, fixedWidthStyle, isMe ? styles.deletedBubbleMe : styles.deletedBubbleOther, isSelected && styles.selectedBubble]}>
+          <Text style={[styles.deletedText, isMe && styles.deletedTextMe]}>
+            {getDeletedPlaceholder(isMe)}
+          </Text>
+          <MessageTimeStatus
+            time={formatTime(item.created_at)}
+            status={item.status}
+            isMe={isMe}
+            compact
+          />
+        </View>
+      );
+    }
+
+    if (item.msg_type === 'text') {
+      const rawContent = item.content ?? '';
+      const displayContent = rawContent.trim() || ' ';
+      return (
+        <View style={[
+          styles.bubble,
+          fixedWidthStyle,
+          isMe ? styles.bubbleMe : styles.bubbleOther,
+          isSelected && styles.selectedBubble,
+        ]}>
+          {renderReplySnippet(item, isMe)}
+          <View style={styles.bubbleContentRow}>
+            <Text style={[styles.textContent, isMe && styles.textContentMe]}>
+              {displayContent}
             </Text>
             <MessageTimeStatus
               time={formatTime(item.created_at)}
@@ -576,47 +675,18 @@ export function ChatScreen() {
       );
     }
 
-    if (item.msg_type === 'text') {
-      const rawContent = item.content ?? '';
-      const displayContent = rawContent.trim() || ' ';
-      return (
-        <View style={[styles.messageWrap, isMe ? styles.messageWrapMe : styles.messageWrapOther]}>
-          <View style={[
-            styles.bubble,
-            isMe ? styles.bubbleMe : styles.bubbleOther,
-            isSelected && styles.selectedBubble,
-          ]}>
-            {renderReplySnippet(item, isMe)}
-            <View style={styles.bubbleContentRow}>
-              <Text style={[styles.textContent, isMe && styles.textContentMe]}>
-                {displayContent}
-              </Text>
-              <MessageTimeStatus
-                time={formatTime(item.created_at)}
-                status={item.status}
-                isMe={isMe}
-                compact
-              />
-            </View>
-          </View>
-        </View>
-      );
-    }
-
     if (item.msg_type === 'voice' && item.media?.[0]) {
       return (
-        <View style={[styles.messageWrap, isMe ? styles.messageWrapMe : styles.messageWrapOther]}>
-          <View style={[styles.mediaStack, isSelected && styles.selectedBubble]}>
-            {renderReplySnippet(item, isMe)}
-            <VoiceBubble
-              uri={item.media[0].remote_url ?? `file://${item.id}`}
-              waveform={item.media[0].waveform ?? []}
-              durationMs={item.media[0].duration_ms ?? 0}
-              isMe={isMe}
-              time={formatTime(item.created_at)}
-              status={item.status}
-            />
-          </View>
+        <View style={[styles.mediaStack, fixedWidthStyle, isSelected && styles.selectedBubble]}>
+          {renderReplySnippet(item, isMe)}
+          <VoiceBubble
+            uri={item.media[0].remote_url ?? `file://${item.id}`}
+            waveform={item.media[0].waveform ?? []}
+            durationMs={item.media[0].duration_ms ?? 0}
+            isMe={isMe}
+            time={formatTime(item.created_at)}
+            status={item.status}
+          />
         </View>
       );
     }
@@ -627,41 +697,54 @@ export function ChatScreen() {
       if (!imageUri.trim()) return null;
 
       return (
-        <View style={[styles.messageWrap, isMe ? styles.messageWrapMe : styles.messageWrapOther]}>
-          <View style={[styles.mediaStack, isSelected && styles.selectedBubble]}>
-            {renderReplySnippet(item, isMe)}
-            <ImageBubble
-              uri={imageUri}
-              isMe={isMe}
-              width={media?.width}
-              height={media?.height}
-              caption={item.content ?? undefined}
-              time={formatTime(item.created_at)}
-              status={item.status}
-            />
-          </View>
+        <View style={[styles.mediaStack, fixedWidthStyle, isSelected && styles.selectedBubble]}>
+          {renderReplySnippet(item, isMe)}
+          <ImageBubble
+            uri={imageUri}
+            isMe={isMe}
+            width={media?.width}
+            height={media?.height}
+            caption={item.content ?? undefined}
+            time={formatTime(item.created_at)}
+            status={item.status}
+          />
         </View>
       );
     }
 
     if (item.msg_type === 'file' && item.media?.[0]) {
       return (
-        <View style={[styles.messageWrap, isMe ? styles.messageWrapMe : styles.messageWrapOther]}>
-          <View style={[styles.mediaStack, isSelected && styles.selectedBubble]}>
-            {renderReplySnippet(item, isMe)}
-            <FileBubble
-              fileName={item.media[0].file_name ?? 'File'}
-              fileSize={item.media[0].file_size}
-              uri={item.media[0].remote_url ?? undefined}
-              isMe={isMe}
-            />
-          </View>
+        <View style={[styles.mediaStack, fixedWidthStyle, isSelected && styles.selectedBubble]}>
+          {renderReplySnippet(item, isMe)}
+          <FileBubble
+            fileName={item.media[0].file_name ?? 'File'}
+            fileSize={item.media[0].file_size}
+            uri={item.media[0].remote_url ?? undefined}
+            isMe={isMe}
+          />
         </View>
       );
     }
 
     return null;
-  }, [currentUserId, renderReplySnippet, selectedMessageIds]);
+  }, [currentUserId, renderReplySnippet]);
+
+  const renderMessageCard = useCallback((item: Message) => {
+    const isMe = item.sender_id === currentUserId;
+    const isSelected = selectedMessageIds.includes(item.id);
+
+    return (
+      <View style={[styles.messageWrap, isMe ? styles.messageWrapMe : styles.messageWrapOther]}>
+        <View
+          ref={(node) => setMessageContentRef(item.id, node)}
+          collapsable={false}
+          style={styles.messageContentMeasure}
+        >
+          {renderMessageBody(item, isSelected)}
+        </View>
+      </View>
+    );
+  }, [currentUserId, renderMessageBody, selectedMessageIds, setMessageContentRef]);
 
   const menuActions = useMemo<MenuAction[]>(() => {
     if (!activeMenuMessage) return [];
@@ -679,24 +762,25 @@ export function ChatScreen() {
     ];
   }, [activeMenuMessage, pinnedMessageId]);
 
-  const menuTop = menuState
-    ? Math.max(16, Math.min(menuState.pageY + 10, 480))
-    : 0;
-  const menuLeft = menuState
-    ? Math.max(12, Math.min(menuState.pageX - MENU_WIDTH * 0.55, SCREEN_WIDTH - MENU_WIDTH - 12))
-    : 12;
-
   const backdropOpacity = menuAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [0, 1],
   });
   const menuTranslateY = menuAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [18, 0],
+    outputRange: [menuState?.placement === 'above' ? -14 : 16, 0],
   });
   const menuScale = menuAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [0.96, 1],
+  });
+  const previewTranslateY = menuAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [menuState?.placement === 'above' ? -6 : 10, 0],
+  });
+  const reactionTranslateY = menuAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [8, 0],
   });
 
   return (
@@ -762,13 +846,7 @@ export function ChatScreen() {
             <Pressable
               delayLongPress={220}
               onPress={() => handleMessagePress(item.id)}
-              onLongPress={(event) =>
-                handleMessageLongPress(
-                  item,
-                  event.nativeEvent.pageX,
-                  event.nativeEvent.pageY
-                )
-              }
+              onLongPress={() => openMessageMenu(item)}
               style={styles.messagePressable}
             >
               {renderMessageCard(item)}
@@ -792,23 +870,75 @@ export function ChatScreen() {
         />
       </View>
 
-      <Modal
-        visible={menuState != null}
-        transparent
-        animationType="none"
-        onRequestClose={closeMenu}
-      >
-        <Pressable style={styles.menuBackdrop} onPress={closeMenu}>
-          <Animated.View style={[styles.menuBlurWrap, { opacity: backdropOpacity }]}>
-            <BlurView intensity={72} tint="light" style={styles.menuBackdropBlur} />
-            <View pointerEvents="none" style={styles.menuBackdropHaze} />
+      {menuState ? (
+        <View pointerEvents="box-none" style={styles.menuOverlayRoot}>
+          <Pressable style={styles.menuBackdrop} onPress={closeMenu}>
+            <Animated.View style={[styles.menuBlurWrap, { opacity: backdropOpacity }]}>
+              <BlurView
+                intensity={82}
+                tint="default"
+                experimentalBlurMethod="dimezisBlurView"
+                style={styles.menuBackdropBlur}
+              />
+              <View pointerEvents="none" style={styles.menuBackdropTone} />
+            </Animated.View>
+          </Pressable>
+          {activeMenuMessage ? (
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.menuPreviewOverlay,
+                {
+                  top: menuState.previewTop,
+                  left: menuState.previewLeft,
+                  width: menuState.previewWidth,
+                  opacity: menuAnim,
+                  transform: [{ translateY: previewTranslateY }, { scale: menuScale }],
+                },
+              ]}
+            >
+              <View style={[styles.menuPreviewWrap, { width: menuState.previewWidth }]}>
+                {renderMessageBody(activeMenuMessage, false, menuState.previewWidth)}
+              </View>
+            </Animated.View>
+          ) : null}
+          <Animated.View
+            style={[
+              styles.reactionBar,
+              {
+                top: Math.max(
+                  MENU_EDGE_GAP,
+                  menuState.previewTop - REACTION_BAR_HEIGHT - 8
+                ),
+                left: Math.max(
+                  MENU_EDGE_GAP,
+                  Math.min(
+                    menuState.isMe
+                      ? menuState.previewLeft + menuState.previewWidth - REACTION_BAR_WIDTH
+                      : menuState.previewLeft,
+                    SCREEN_WIDTH - REACTION_BAR_WIDTH - MENU_EDGE_GAP
+                  )
+                ),
+                opacity: menuAnim,
+                transform: [{ translateY: reactionTranslateY }, { scale: menuScale }],
+              },
+            ]}
+          >
+            {MENU_REACTIONS.map((reaction) => (
+              <Text key={reaction} style={styles.reactionEmoji}>
+                {reaction}
+              </Text>
+            ))}
+            <View style={styles.reactionCheck}>
+              <Feather name="check" size={18} color="#FFFFFF" />
+            </View>
           </Animated.View>
           <Animated.View
             style={[
               styles.menuCard,
               {
-                top: menuTop,
-                left: menuLeft,
+                top: menuState?.menuTop ?? 0,
+                left: menuState?.menuLeft ?? MENU_EDGE_GAP,
                 opacity: menuAnim,
                 transform: [{ translateY: menuTranslateY }, { scale: menuScale }],
               },
@@ -830,12 +960,12 @@ export function ChatScreen() {
                 <Text style={[styles.menuActionLabel, { color: action.color }]}>
                   {action.label}
                 </Text>
-                <Feather name={action.icon as never} size={20} color={action.color} />
+                <Feather name={action.icon as never} size={18} color={action.color} />
               </Pressable>
             ))}
           </Animated.View>
-        </Pressable>
-      </Modal>
+        </View>
+      ) : null}
 
       <Modal
         visible={forwardSourceMessageId != null}
@@ -987,6 +1117,9 @@ const styles = StyleSheet.create({
   messageWrapOther: {
     alignItems: 'flex-start',
   },
+  messageContentMeasure: {
+    flexShrink: 1,
+  },
   bubble: {
     paddingHorizontal: 10,
     paddingVertical: 7,
@@ -1040,9 +1173,14 @@ const styles = StyleSheet.create({
   deletedTextMe: {
     color: '#426789',
   },
+  menuOverlayRoot: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 40,
+    elevation: 40,
+  },
   menuBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(12, 17, 29, 0.08)',
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'transparent',
   },
   menuBlurWrap: {
     ...StyleSheet.absoluteFillObject,
@@ -1050,14 +1188,51 @@ const styles = StyleSheet.create({
   menuBackdropBlur: {
     ...StyleSheet.absoluteFillObject,
   },
-  menuBackdropHaze: {
+  menuBackdropTone: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(248, 252, 255, 0.16)',
+    backgroundColor: 'rgba(255, 255, 255, 0.015)',
+  },
+  menuPreviewOverlay: {
+    position: 'absolute',
+  },
+  menuPreviewWrap: {
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  reactionBar: {
+    position: 'absolute',
+    width: REACTION_BAR_WIDTH,
+    height: REACTION_BAR_HEIGHT,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.94)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: 12,
+    paddingRight: 6,
+    gap: 8,
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.16,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 10,
+  },
+  reactionEmoji: {
+    fontSize: 24,
+    lineHeight: 28,
+  },
+  reactionCheck: {
+    marginLeft: 'auto',
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#CDE0C0',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   menuCard: {
     position: 'absolute',
     width: MENU_WIDTH,
-    backgroundColor: 'rgba(255,255,255,0.975)',
+    backgroundColor: 'rgba(255,255,255,0.935)',
     borderRadius: 18,
     overflow: 'hidden',
     shadowColor: '#0F172A',
@@ -1067,11 +1242,11 @@ const styles = StyleSheet.create({
     elevation: 12,
   },
   menuAction: {
-    minHeight: 45,
+    minHeight: MENU_ITEM_HEIGHT,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
   },
   menuActionBorder: {
     borderBottomWidth: 1,
@@ -1081,8 +1256,8 @@ const styles = StyleSheet.create({
     opacity: 0.52,
   },
   menuActionLabel: {
-    fontSize: 15,
-    lineHeight: 20,
+    fontSize: 14,
+    lineHeight: 18,
     fontWeight: '500',
   },
   forwardRoot: {

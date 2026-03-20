@@ -101,6 +101,7 @@ function TabBarItem({
 export function MainTabs() {
   return (
     <Tab.Navigator
+      id={undefined as never}
       screenOptions={({ route }) => ({
         headerShown: true,
         headerStyle: {
