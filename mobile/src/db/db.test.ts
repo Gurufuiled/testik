@@ -63,6 +63,7 @@ export async function runDbTest(): Promise<void> {
     avatar_url: null,
     created_by: 'test-user-1',
     last_message_id: null,
+    pinned_message_id: null,
     last_message_at: null,
     last_message_preview: null,
     unread_count: 0,

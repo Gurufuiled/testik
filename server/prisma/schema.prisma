@@ -98,6 +98,7 @@ model Chat {
   avatarUrl           String?   @map("avatar_url")
   createdById         String    @map("created_by_id")
   lastMessageId       String?   @map("last_message_id")
+  pinnedMessageId     String?   @map("pinned_message_id")
   lastMessageAt       DateTime? @map("last_message_at")
   lastMessagePreview  String?   @map("last_message_preview")
   unreadCount         Int       @default(0) @map("unread_count") // per-chat, can be computed per user
@@ -110,6 +111,7 @@ model Chat {
 
   createdBy   User        @relation("ChatCreator", fields: [createdById], references: [id], onDelete: Cascade)
   lastMessage Message?    @relation("ChatLastMessage", fields: [lastMessageId], references: [id], onDelete: SetNull)
+  pinnedMessage Message?  @relation("ChatPinnedMessage", fields: [pinnedMessageId], references: [id], onDelete: SetNull)
   members     ChatMember[]
   messages    Message[]
 
@@ -152,6 +154,7 @@ model Message {
   replies    Message[] @relation("MessageReplies")
   media      Media[]
   chatsAsLastMessage Chat[] @relation("ChatLastMessage")
+  chatsAsPinnedMessage Chat[] @relation("ChatPinnedMessage")
 
   @@index([chatId])
   @@index([senderId])

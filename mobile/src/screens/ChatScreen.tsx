@@ -24,7 +24,6 @@ import type { ChatsStackParamList } from '../navigation/types';
 import { authStore } from '../stores/authStore';
 import { chatStore } from '../stores/chatStore';
 import { messageStore } from '../stores/messageStore';
-import { uiStore } from '../stores/uiStore';
 import { canForwardMessage, TransportService } from '../services/TransportService';
 import { SyncService } from '../services/SyncService';
 import {
@@ -123,6 +122,7 @@ export function ChatScreen() {
   const route = useRoute<ChatRoute>();
   const { chatId } = route.params;
   const currentUserId = authStore((s) => s.user?.id ?? null);
+  const listRef = useRef<FlatList<Message> | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [inputBarHeight, setInputBarHeight] = useState(82);
   const [replyToMessageId, setReplyToMessageId] = useState<string | null>(null);
@@ -156,18 +156,13 @@ export function ChatScreen() {
     : null;
   const activeMenuMessage = menuState ? messageById.get(menuState.messageId) ?? null : null;
   const selectionMode = selectedMessageIds.length > 0;
-  const pinnedMessageId = uiStore((s) => s.pinnedMessageIdByChatId[chatId] ?? null);
+  const currentChat = chats.find((chat) => chat.id === chatId) ?? null;
+  const pinnedMessageId = currentChat?.pinned_message_id ?? null;
   const pinnedMessage = pinnedMessageId ? messageById.get(pinnedMessageId) ?? null : null;
   const forwardTargets = useMemo(
     () => chats.filter((chat) => chat.id !== chatId),
     [chatId, chats]
   );
-
-  useEffect(() => {
-    if (!uiStore.getState().isPinnedMessagesHydrated) {
-      uiStore.getState().hydratePinnedMessages().catch(() => {});
-    }
-  }, []);
 
   useEffect(() => {
     const existing = messageStore.getState().messagesByChatId[chatId];
@@ -178,7 +173,7 @@ export function ChatScreen() {
 
   useEffect(() => {
     if (pinnedMessageId && !messageById.has(pinnedMessageId)) {
-      uiStore.getState().setPinnedMessage(chatId, null);
+      SyncService.fetchMessagesForChat(chatId).catch(() => {});
     }
   }, [chatId, messageById, pinnedMessageId]);
 
@@ -212,6 +207,43 @@ export function ChatScreen() {
   const clearReplyState = useCallback(() => {
     setReplyToMessageId(null);
   }, []);
+
+  const handlePinnedBannerPress = useCallback(() => {
+    if (!pinnedMessageId) return;
+
+    const targetIndex = messages.findIndex((message) => message.id === pinnedMessageId);
+    if (targetIndex < 0) {
+      Alert.alert(
+        'Сообщение не найдено',
+        'Закрепленное сообщение пока не загружено в этот экран.'
+      );
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      listRef.current?.scrollToIndex({
+        index: targetIndex,
+        animated: true,
+        viewPosition: 0.45,
+      });
+    });
+  }, [messages, pinnedMessageId]);
+
+  const handleScrollToIndexFailed = useCallback(
+    (info: { index: number; averageItemLength: number }) => {
+      const fallbackOffset = Math.max(info.index * Math.max(info.averageItemLength, 72), 0);
+      listRef.current?.scrollToOffset({ offset: fallbackOffset, animated: true });
+
+      setTimeout(() => {
+        listRef.current?.scrollToIndex({
+          index: info.index,
+          animated: true,
+          viewPosition: 0.45,
+        });
+      }, 120);
+    },
+    []
+  );
 
   const toggleSelectedMessage = useCallback((messageId: string) => {
     setSelectedMessageIds((prev) =>
@@ -391,31 +423,43 @@ export function ChatScreen() {
   const handleDeleteMessage = useCallback((message: Message) => {
     closeMenu();
     if (message.sender_id !== currentUserId) {
-      Alert.alert('РЈРґР°Р»РµРЅРёРµ РЅРµРґРѕСЃС‚СѓРїРЅРѕ', 'РЎРµР№С‡Р°СЃ РјРѕР¶РЅРѕ СѓРґР°Р»РёС‚СЊ С‚РѕР»СЊРєРѕ СЃРІРѕРё СЃРѕРѕР±С‰РµРЅРёСЏ.');
+      Alert.alert('Удаление недоступно', 'Сейчас можно удалить только свои сообщения.');
       return;
     }
 
-    Alert.alert('РЈРґР°Р»РёС‚СЊ СЃРѕРѕР±С‰РµРЅРёРµ?', 'РЎРѕРѕР±С‰РµРЅРёРµ РёСЃС‡РµР·РЅРµС‚ РёР· СЌС‚РѕРіРѕ С‡Р°С‚Р°.', [
-      { text: 'РћС‚РјРµРЅР°', style: 'cancel' },
+    Alert.alert('Удалить сообщение?', 'Сообщение исчезнет из этого чата.', [
+      { text: 'Отмена', style: 'cancel' },
       {
-        text: 'РЈРґР°Р»РёС‚СЊ',
+        text: 'Удалить',
         style: 'destructive',
         onPress: () => {
           messageStore.getState().updateMessage(chatId, message.id, {
             is_deleted: 1,
             content: null,
           });
+          if (pinnedMessageId === message.id && currentChat) {
+            chatStore.getState().updateChat({
+              ...currentChat,
+              pinned_message_id: null,
+            });
+          }
           TransportService.deleteMessage(chatId, message.id);
         },
       },
     ]);
-  }, [chatId, closeMenu, currentUserId]);
+  }, [chatId, closeMenu, currentChat, currentUserId, pinnedMessageId]);
 
   const handlePinToggle = useCallback((message: Message) => {
-    const currentPinned = uiStore.getState().pinnedMessageIdByChatId[chatId] ?? null;
-    uiStore.getState().setPinnedMessage(chatId, currentPinned === message.id ? null : message.id);
+    const nextPinnedId = pinnedMessageId === message.id ? null : message.id;
+    if (currentChat) {
+      chatStore.getState().updateChat({
+        ...currentChat,
+        pinned_message_id: nextPinnedId,
+      });
+    }
+    TransportService.pinMessage(chatId, nextPinnedId);
     closeMenu();
-  }, [chatId, closeMenu]);
+  }, [chatId, closeMenu, currentChat, pinnedMessageId]);
 
   const handleForwardMessage = useCallback((message: Message) => {
     closeMenu();
@@ -673,15 +717,25 @@ export function ChatScreen() {
         <View style={styles.pinnedBannerWrap}>
           <View style={styles.pinnedBanner}>
             <View style={styles.pinnedAccent} />
-            <View style={styles.pinnedContent}>
-              <Text style={styles.pinnedTitle}>Закрепленное сообщение</Text>
-              <Text numberOfLines={1} style={styles.pinnedText}>
-                {buildReplyPreviewText(pinnedMessage)}
-              </Text>
-            </View>
+            <Pressable onPress={handlePinnedBannerPress} style={styles.pinnedMainPressable}>
+              <View style={styles.pinnedContent}>
+                <Text style={styles.pinnedTitle}>Закрепленное сообщение</Text>
+                <Text numberOfLines={1} style={styles.pinnedText}>
+                  {buildReplyPreviewText(pinnedMessage)}
+                </Text>
+              </View>
+            </Pressable>
             <Pressable
               hitSlop={10}
-              onPress={() => uiStore.getState().setPinnedMessage(chatId, null)}
+              onPress={() => {
+                if (currentChat) {
+                  chatStore.getState().updateChat({
+                    ...currentChat,
+                    pinned_message_id: null,
+                  });
+                }
+                TransportService.pinMessage(chatId, null);
+              }}
               style={styles.pinnedClose}
             >
               <Feather name="x" size={16} color="#65717E" />
@@ -692,11 +746,13 @@ export function ChatScreen() {
 
       <View style={styles.listWrap}>
         <FlatList
+          ref={listRef}
           key={`${chatId}-${messages.length}`}
           data={messages}
           keyExtractor={(m) => m.id}
           inverted
           extraData={`${messages.length}-${selectedMessageIds.join(',')}-${replyToMessageId ?? ''}-${pinnedMessageId ?? ''}`}
+          onScrollToIndexFailed={handleScrollToIndexFailed}
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={[
             styles.listContent,
@@ -881,6 +937,10 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   pinnedContent: {
+    flex: 1,
+    minWidth: 0,
+  },
+  pinnedMainPressable: {
     flex: 1,
     minWidth: 0,
   },

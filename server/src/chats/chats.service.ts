@@ -130,4 +130,44 @@ export class ChatsService {
       includeMembers: true,
     });
   }
+
+  async setPinnedMessage(
+    chatId: string,
+    userId: string,
+    messageId: string | null,
+  ): Promise<MappedChat> {
+    const member = await this.prisma.chatMember.findUnique({
+      where: { chatId_userId: { chatId, userId } },
+    });
+    if (!member) {
+      throw new BadRequestException('Not a member of this chat');
+    }
+
+    if (messageId) {
+      const message = await this.prisma.message.findFirst({
+        where: { id: messageId, chatId, isDeleted: false },
+        select: { id: true },
+      });
+      if (!message) {
+        throw new BadRequestException('Message not found in this chat');
+      }
+    }
+
+    const chat = await this.prisma.chat.update({
+      where: { id: chatId },
+      data: {
+        pinnedMessageId: messageId,
+      },
+      include: {
+        members: { include: { user: true } },
+        lastMessage: true,
+      },
+    });
+
+    return mapChat(chat, {
+      includeLastMessage: true,
+      includeMembers: true,
+      currentUserId: userId,
+    });
+  }
 }

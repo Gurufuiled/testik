@@ -10,6 +10,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import { MessagesService } from '../messages/messages.service';
+import { ChatsService } from '../chats/chats.service';
 
 const WS_PORT = parseInt(process.env.WS_PORT ?? '4001', 10);
 
@@ -34,6 +35,7 @@ export class WebsocketGateway
     private readonly jwtService: JwtService,
     private readonly prisma: PrismaService,
     private readonly messagesService: MessagesService,
+    private readonly chatsService: ChatsService,
   ) {}
 
   async handleConnection(client: AuthenticatedSocket, ...args: unknown[]) {
@@ -219,8 +221,48 @@ export class WebsocketGateway
         message_id: message.id,
       });
       members.forEach((uid) => this.sendToUser(uid, data));
+
+      const chat = await this.prisma.chat.findUnique({
+        where: { id: chatId },
+        select: { pinnedMessageId: true },
+      });
+      if (!chat?.pinnedMessageId) {
+        const pinnedData = JSON.stringify({
+          type: 'chat_pinned_message_updated',
+          chat_id: chatId,
+          pinned_message_id: null,
+        });
+        members.forEach((uid) => this.sendToUser(uid, pinnedData));
+      }
     } catch (err) {
       this.logger.warn(`delete_message failed: ${err}`);
+    }
+  }
+
+  @SubscribeMessage('pin_message')
+  async handlePinMessage(
+    client: AuthenticatedSocket,
+    payload: { chat_id?: string; message_id?: string | null },
+  ) {
+    if (!client.userId) return;
+    const { chat_id: chatId, message_id: messageId } = payload;
+    if (!chatId) return;
+
+    try {
+      const chat = await this.chatsService.setPinnedMessage(
+        chatId,
+        client.userId,
+        messageId ?? null,
+      );
+      const members = await this.getChatMemberIds(chatId);
+      const data = JSON.stringify({
+        type: 'chat_pinned_message_updated',
+        chat_id: chat.id,
+        pinned_message_id: chat.pinned_message_id,
+      });
+      members.forEach((uid) => this.sendToUser(uid, data));
+    } catch (err) {
+      this.logger.warn(`pin_message failed: ${err}`);
     }
   }
 

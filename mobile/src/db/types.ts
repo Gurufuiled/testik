@@ -32,6 +32,7 @@ export interface ChatRow {
   avatar_url: string | null;
   created_by: string | null;
   last_message_id: string | null;
+  pinned_message_id: string | null;
   last_message_at: number | null;
   last_message_preview: string | null;
   unread_count: number;

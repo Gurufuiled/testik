@@ -143,7 +143,7 @@ export class MessagesService {
 
       const chat = await tx.chat.findUnique({
         where: { id: chatId },
-        select: { lastMessageId: true },
+        select: { lastMessageId: true, pinnedMessageId: true },
       });
 
       if (chat?.lastMessageId === messageId) {
@@ -151,6 +151,15 @@ export class MessagesService {
           where: { id: chatId },
           data: {
             lastMessagePreview: 'Deleted message',
+          },
+        });
+      }
+
+      if (chat?.pinnedMessageId === messageId) {
+        await tx.chat.update({
+          where: { id: chatId },
+          data: {
+            pinnedMessageId: null,
           },
         });
       }

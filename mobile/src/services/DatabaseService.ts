@@ -44,6 +44,14 @@ export async function initDatabase(): Promise<SQLite.SQLiteDatabase> {
         // Column may already exist
       }
     }
+    // v3->v4: add pinned_message_id to chats
+    if (currentVersion >= 3 && currentVersion < 4) {
+      try {
+        await db.execAsync('ALTER TABLE chats ADD COLUMN pinned_message_id TEXT;');
+      } catch {
+        // Column may already exist
+      }
+    }
     await db.execAsync(SCHEMA_SQL);
     await db.runAsync('PRAGMA user_version = ' + DB_VERSION);
   }

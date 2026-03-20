@@ -234,6 +234,27 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
             is_deleted: 1,
             content: null,
           });
+          const chat = chatStore.getState().chats.find((item) => item.id === chat_id);
+          if (chat?.pinned_message_id === message_id) {
+            chatStore.getState().updateChat({
+              ...chat,
+              pinned_message_id: null,
+            });
+          }
+        },
+
+        onChatPinnedMessageUpdated: (payload) => {
+          const { chat_id, pinned_message_id } = payload as {
+            chat_id?: string;
+            pinned_message_id?: string | null;
+          };
+          if (!chat_id) return;
+          const chat = chatStore.getState().chats.find((item) => item.id === chat_id);
+          if (!chat) return;
+          chatStore.getState().updateChat({
+            ...chat,
+            pinned_message_id: pinned_message_id ?? null,
+          });
         },
 
         onTyping: (payload) => {

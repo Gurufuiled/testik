@@ -494,6 +494,23 @@ class TransportServiceClass {
     );
   }
 
+  pinMessage(chatId: string, messageId: string | null): void {
+    if (WebSocketService.isConnected()) {
+      WebSocketService.sendEvent('pin_message', {
+        chat_id: chatId,
+        message_id: messageId,
+      });
+      return;
+    }
+
+    queueToSyncQueue(
+      this.syncQueueDao,
+      'pin_message',
+      { chatId, messageId },
+      messageId ?? chatId
+    );
+  }
+
   forwardMessage(chatId: string, sourceMessage: Message): boolean {
     const payload = buildForwardPayload(sourceMessage);
     if (!payload) return false;

@@ -3,7 +3,7 @@
  * Uses PRAGMA user_version for migration tracking.
  */
 
-export const DB_VERSION = 3;
+export const DB_VERSION = 4;
 
 export const SCHEMA_SQL = `
 -- users
@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS chats (
   avatar_url TEXT,
   created_by TEXT,
   last_message_id TEXT,
+  pinned_message_id TEXT,
   last_message_at INTEGER,
   last_message_preview TEXT,
   unread_count INTEGER DEFAULT 0,
@@ -49,7 +50,8 @@ CREATE TABLE IF NOT EXISTS chats (
   draft TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
-  FOREIGN KEY (created_by) REFERENCES users(id)
+  FOREIGN KEY (created_by) REFERENCES users(id),
+  FOREIGN KEY (pinned_message_id) REFERENCES messages(id) ON DELETE SET NULL
 );
 
 -- chat_members

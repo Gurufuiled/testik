@@ -112,6 +112,7 @@ export type MappedChat = {
   peer_display_name?: string | null;
   created_by_id: string;
   last_message_id: string | null;
+  pinned_message_id: string | null;
   last_message_at: number | null;
   last_message_preview: string | null;
   unread_count: number;
@@ -143,6 +144,7 @@ export function mapChat(
     peer_display_name: null,
     created_by_id: chat.createdById,
     last_message_id: chat.lastMessageId ?? null,
+    pinned_message_id: chat.pinnedMessageId ?? null,
     last_message_at: dateToUnixMs(chat.lastMessageAt),
     last_message_preview: chat.lastMessagePreview ?? null,
     unread_count: chat.unreadCount,

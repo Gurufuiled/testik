@@ -31,6 +31,7 @@ interface ApiChat {
   avatar_url: string | null;
   created_by_id: string;
   last_message_id: string | null;
+  pinned_message_id: string | null;
   last_message_at: number | null;
   last_message_preview: string | null;
   unread_count: number;
@@ -52,6 +53,7 @@ function mapApiChatToChat(api: ApiChat): Chat {
     avatar_url: api.avatar_url,
     created_by: api.created_by_id,
     last_message_id: api.last_message_id,
+    pinned_message_id: api.pinned_message_id ?? null,
     last_message_at: api.last_message_at,
     last_message_preview: api.last_message_preview,
     unread_count: api.unread_count,
@@ -145,6 +147,7 @@ type PayloadVideoNote = { chatId: string; uri: string; durationMs: number; thumb
 type PayloadImage = { chatId: string; uri: string; width?: number; height?: number; fileName?: string; mimeType?: string; caption?: string; tempId: string; replyToId?: string | null };
 type PayloadFile = { chatId: string; uri: string; name: string; size: number; mimeType?: string; tempId: string; replyToId?: string | null };
 type PayloadDelete = { chatId: string; messageId: string };
+type PayloadPin = { chatId: string; messageId: string | null };
 type PayloadForward = {
   chatId: string;
   sourceMessage: Message;
@@ -271,6 +274,15 @@ async function executeAction(action: string, payload: unknown): Promise<void> {
     case 'delete_message': {
       const p = payload as PayloadDelete;
       WebSocketService.sendEvent('delete_message', {
+        chat_id: p.chatId,
+        message_id: p.messageId,
+      });
+      return;
+    }
+
+    case 'pin_message': {
+      const p = payload as PayloadPin;
+      WebSocketService.sendEvent('pin_message', {
         chat_id: p.chatId,
         message_id: p.messageId,
       });

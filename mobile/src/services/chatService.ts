@@ -14,6 +14,7 @@ interface ApiChat {
   avatar_url: string | null;
   created_by_id: string;
   last_message_id: string | null;
+  pinned_message_id: string | null;
   last_message_at: number | null;
   last_message_preview: string | null;
   unread_count: number;
@@ -35,6 +36,7 @@ function mapApiChatToChat(api: ApiChat): Chat {
     avatar_url: api.avatar_url ?? null,
     created_by: api.created_by_id ?? null,
     last_message_id: api.last_message_id,
+    pinned_message_id: api.pinned_message_id ?? null,
     last_message_at: api.last_message_at,
     last_message_preview: api.last_message_preview,
     unread_count: api.unread_count,
