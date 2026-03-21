@@ -76,10 +76,10 @@ function SendIcon() {
 
 function SheetActionIcon({ tone }: { tone: AttachmentAction['tone'] }) {
   if (tone === 'video') {
-    return <MaterialCommunityIcons name="play-circle-outline" size={22} color="#6B7280" />;
+    return <MaterialCommunityIcons name="play-circle-outline" size={19} color="#6B7280" />;
   }
 
-  return <Feather name="file-text" size={19} color="#6B7280" />;
+  return <Feather name="file-text" size={16} color="#6B7280" />;
 }
 
 export function InputBar({
@@ -638,9 +638,9 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     paddingTop: 10,
-    paddingBottom: 22,
+    paddingBottom: 16,
     paddingHorizontal: 16,
-    maxHeight: '76%',
+    maxHeight: '80%',
     shadowColor: '#0F172A',
     shadowOpacity: 0.08,
     shadowRadius: 18,
@@ -656,7 +656,7 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   sheetHeader: {
-    marginBottom: 12,
+    marginBottom: 10,
     paddingHorizontal: 4,
   },
   sheetTitle: {
@@ -674,10 +674,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#F8FAFD',
     borderWidth: 1,
     borderColor: '#E6EBF2',
-    padding: 8,
+    padding: 7,
   },
   galleryScroll: {
-    maxHeight: 292,
+    maxHeight: 338,
   },
   galleryGrid: {
     flexDirection: 'row',
@@ -712,34 +712,34 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   sheetSectionTitle: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
     color: '#374151',
-    marginTop: 12,
-    marginBottom: 8,
+    marginTop: 9,
+    marginBottom: 5,
     paddingHorizontal: 4,
   },
   sheetActionsRow: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 8,
   },
   sheetAction: {
     alignItems: 'center',
-    width: 68,
+    width: 56,
   },
   sheetIconWrap: {
-    width: 50,
-    height: 50,
-    borderRadius: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 13,
     backgroundColor: '#F8FAFD',
     borderWidth: 1,
     borderColor: '#E6EBF2',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 6,
+    marginBottom: 4,
   },
   sheetActionLabel: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#4B5563',
     fontWeight: '600',
     textAlign: 'center',

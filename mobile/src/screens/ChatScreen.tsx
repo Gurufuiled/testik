@@ -20,6 +20,7 @@ import {
   View,
 } from 'react-native';
 import { useRoute, RouteProp } from '@react-navigation/native';
+import Swipeable from 'react-native-gesture-handler/Swipeable';
 import type { ChatsStackParamList } from '../navigation/types';
 import { authStore } from '../stores/authStore';
 import { chatStore } from '../stores/chatStore';
@@ -148,6 +149,7 @@ export function ChatScreen() {
   const [forwardSourceMessageId, setForwardSourceMessageId] = useState<string | null>(null);
   const menuAnim = useRef(new Animated.Value(0)).current;
   const messageContentRefs = useRef<Record<string, View | null>>({});
+  const swipeableRefs = useRef<Record<string, Swipeable | null>>({});
 
   const messages = useSyncExternalStore(
     (onStoreChange) => messageStore.subscribe(onStoreChange),
@@ -607,6 +609,30 @@ export function ChatScreen() {
     }
   }, [inputBarHeight]);
 
+  const canSwipeReply = useCallback((message: Message) => {
+    if (selectionMode) return false;
+    if (message.is_deleted === 1) return false;
+    return message.msg_type === 'text' || message.msg_type === 'voice' || message.msg_type === 'image';
+  }, [selectionMode]);
+
+  const handleSwipeReply = useCallback((message: Message) => {
+    setReplyToMessageId(message.id);
+    const swipeable = swipeableRefs.current[message.id];
+    requestAnimationFrame(() => {
+      swipeable?.close();
+    });
+  }, []);
+
+  const renderReplySwipeAction = useCallback(() => {
+    return (
+      <View style={styles.replySwipeAction}>
+        <View style={styles.replySwipeIconWrap}>
+          <Feather name="corner-left-up" size={18} color="#4D8DFF" />
+        </View>
+      </View>
+    );
+  }, []);
+
   const renderReplySnippet = useCallback((message: Message, isMe: boolean) => {
     if (!message.reply_to_id) return null;
     const replied = messageById.get(message.reply_to_id);
@@ -844,7 +870,31 @@ export function ChatScreen() {
               styles.listContent,
               { paddingTop: keyboardHeight + inputBarHeight + 8 },
             ]}
-            renderItem={({ item }) => (
+          renderItem={({ item }) => (
+            canSwipeReply(item) ? (
+              <Swipeable
+                ref={(node) => {
+                  swipeableRefs.current[item.id] = node;
+                }}
+                friction={2.15}
+                rightThreshold={34}
+                overshootRight={false}
+                overshootLeft={false}
+                renderRightActions={renderReplySwipeAction}
+                onSwipeableOpen={() => handleSwipeReply(item)}
+                containerStyle={styles.swipeableContainer}
+                childrenContainerStyle={styles.swipeableChildren}
+              >
+                <Pressable
+                  delayLongPress={220}
+                  onPress={() => handleMessagePress(item.id)}
+                  onLongPress={() => openMessageMenu(item)}
+                  style={styles.messagePressable}
+                >
+                  {renderMessageCard(item)}
+                </Pressable>
+              </Swipeable>
+            ) : (
               <Pressable
                 delayLongPress={220}
                 onPress={() => handleMessagePress(item.id)}
@@ -853,9 +903,10 @@ export function ChatScreen() {
               >
                 {renderMessageCard(item)}
               </Pressable>
-            )}
-          />
-        </View>
+            )
+          )}
+        />
+      </View>
 
         <View
           onLayout={handleInputBarLayout}
@@ -1113,6 +1164,12 @@ const styles = StyleSheet.create({
   messagePressable: {
     width: '100%',
   },
+  swipeableContainer: {
+    width: '100%',
+  },
+  swipeableChildren: {
+    width: '100%',
+  },
   messageWrap: {
     paddingHorizontal: 12,
     marginVertical: 4,
@@ -1179,6 +1236,19 @@ const styles = StyleSheet.create({
   },
   deletedTextMe: {
     color: '#426789',
+  },
+  replySwipeAction: {
+    width: 74,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  replySwipeIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(77, 141, 255, 0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   menuOverlayRoot: {
     ...StyleSheet.absoluteFillObject,
