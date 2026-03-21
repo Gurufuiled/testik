@@ -32,6 +32,16 @@ export async function searchUsers(query: string): Promise<ApiUser[]> {
   return res.json() as Promise<ApiUser[]>;
 }
 
+/** Fetch another user's public profile by id. */
+export async function getUserProfile(userId: string): Promise<ApiUser> {
+  const res = await apiGet(`/users/${encodeURIComponent(userId)}`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `Failed to load user profile: ${res.status}`);
+  }
+  return res.json() as Promise<ApiUser>;
+}
+
 /** Update profile via PATCH /users/me. Returns updated user. */
 export async function updateProfile(data: ProfileUpdateData): Promise<ApiUser> {
   const res = await apiPatch('/users/me', data);

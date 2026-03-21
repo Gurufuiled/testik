@@ -19,6 +19,75 @@ type Props = {
 };
 
 const AUTH_BG = require('../../assets/splash/auth-bg-clean.png');
+const LOGINUS_KEYBOARD_FIX_JS = `
+  (function() {
+    function looksLikeLoginField(input) {
+      const text = [
+        input.placeholder || '',
+        input.name || '',
+        input.id || '',
+        input.getAttribute('aria-label') || '',
+        input.getAttribute('autocomplete') || ''
+      ].join(' ').toLowerCase();
+
+      return (
+        text.includes('email') ||
+        text.includes('mail') ||
+        text.includes('phone') ||
+        text.includes('login') ||
+        text.includes('телефон') ||
+        text.includes('почт')
+      );
+    }
+
+    function patchSoft(input) {
+      if (!input || !looksLikeLoginField(input)) return;
+      input.setAttribute('inputmode', 'email');
+      input.setAttribute('autocapitalize', 'none');
+      input.setAttribute('autocomplete', 'username');
+      input.setAttribute('autocorrect', 'off');
+      input.setAttribute('spellcheck', 'false');
+    }
+
+    function patchFocused(input) {
+      if (!input || !looksLikeLoginField(input)) return;
+
+      patchSoft(input);
+
+      try {
+        if (input.type === 'tel' || input.type === 'number') {
+          input.type = 'email';
+        }
+      } catch (e) {}
+
+      input.setAttribute('enterkeyhint', 'next');
+    }
+
+    function patchExistingInputs() {
+      var inputs = document.querySelectorAll('input');
+      for (var i = 0; i < inputs.length; i++) {
+        patchSoft(inputs[i]);
+      }
+    }
+
+    patchExistingInputs();
+
+    document.addEventListener('focusin', function(event) {
+      if (event && event.target && event.target.tagName === 'INPUT') {
+        setTimeout(function() {
+          patchFocused(event.target);
+        }, 0);
+      }
+    }, true);
+
+    var observer = new MutationObserver(function() {
+      patchExistingInputs();
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+
+    true;
+  })();
+`;
 
 function BrandHeader() {
   const logoFloat = useRef(new Animated.Value(0)).current;
@@ -217,6 +286,8 @@ export function LoginScreen({ onLogin }: Props) {
           source={{ uri: loginUrl }}
           style={styles.webview}
           originWhitelist={['https://*', 'http://*']}
+          injectedJavaScriptBeforeContentLoaded={LOGINUS_KEYBOARD_FIX_JS}
+          injectedJavaScript={LOGINUS_KEYBOARD_FIX_JS}
           onMessage={onMessage}
           onError={(e) => {
             console.warn('[Auth] WebView onError', e.nativeEvent);

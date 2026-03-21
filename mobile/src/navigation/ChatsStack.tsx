@@ -2,7 +2,7 @@ import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import Feather from 'expo/node_modules/@expo/vector-icons/Feather';
-import { ChatListScreen, ChatScreen } from '../screens';
+import { ChatListScreen, ChatProfileScreen, ChatScreen } from '../screens';
 import type { ChatsStackParamList } from './types';
 import { resolveAvatarUrl } from '../config';
 import { authStore } from '../stores/authStore';
@@ -16,6 +16,13 @@ function formatPresence(isOnline?: boolean, lastSeen?: number) {
   if (isOnline) return 'в сети';
   if (!lastSeen) return 'был(а) недавно';
   return 'был(а) недавно';
+}
+
+function getChatPeerId(chatId: string): string | null {
+  const currentUserId = authStore.getState().user?.id;
+  const chat = chatStore.getState().chats.find((item) => item.id === chatId);
+  if (!chat || !currentUserId) return null;
+  return chat.members?.find((member) => member.user_id !== currentUserId)?.user_id ?? null;
 }
 
 function ChatHeaderTitle({ title, subtitle }: { title: string; subtitle?: string }) {
@@ -95,22 +102,58 @@ export function ChatsStack() {
       <Stack.Screen
         name="Chat"
         component={ChatScreen}
-        options={({ route }) => {
+        options={({ route, navigation }) => {
           const title = route.params.chatTitle ?? 'Chat';
-          const currentUserId = authStore.getState().user?.id;
           const chat = chatStore.getState().chats.find((item) => item.id === route.params.chatId);
-          const peerId =
-            chat?.members?.find((member) => member.user_id !== currentUserId)?.user_id;
+          const peerId = getChatPeerId(route.params.chatId);
           const presence = peerId ? uiStore.getState().presenceByUserId[peerId] : undefined;
           const avatarUrl = resolveAvatarUrl(chat?.avatar_url);
           const subtitle = formatPresence(presence?.is_online, presence?.last_seen);
+          const openProfile = () => {
+            if (!peerId) return;
+            navigation.navigate('ChatProfile', {
+              chatId: route.params.chatId,
+              userId: peerId,
+              chatTitle: title,
+            });
+          };
 
           return {
             title,
             headerBackTitle: 'Назад',
-            headerTitle: () => <ChatHeaderTitle title={title} subtitle={subtitle} />,
-            headerRight: () => <ChatHeaderActions avatarUrl={avatarUrl} title={title} />,
+            headerTitle: () => (
+              <Pressable
+                onPress={peerId ? openProfile : undefined}
+                disabled={!peerId}
+                style={({ pressed }) => [
+                  styles.headerTitlePressable,
+                  pressed && peerId && styles.headerPressablePressed,
+                ]}
+              >
+                <ChatHeaderTitle title={title} subtitle={subtitle} />
+              </Pressable>
+            ),
+            headerRight: () => (
+              <Pressable
+                onPress={peerId ? openProfile : undefined}
+                disabled={!peerId}
+                style={({ pressed }) => [
+                  styles.headerActionsPressable,
+                  pressed && peerId && styles.headerPressablePressed,
+                ]}
+              >
+                <ChatHeaderActions avatarUrl={avatarUrl} title={title} />
+              </Pressable>
+            ),
           };
+        }}
+      />
+      <Stack.Screen
+        name="ChatProfile"
+        component={ChatProfileScreen}
+        options={{
+          title: 'Профиль',
+          headerBackTitle: 'Назад',
         }}
       />
     </Stack.Navigator>
@@ -122,6 +165,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     maxWidth: 180,
+  },
+  headerTitlePressable: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerTitle: {
     fontSize: 17,
@@ -137,6 +184,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+  },
+  headerActionsPressable: {
+    borderRadius: 20,
+  },
+  headerPressablePressed: {
+    opacity: 0.7,
   },
   callButton: {
     width: 34,

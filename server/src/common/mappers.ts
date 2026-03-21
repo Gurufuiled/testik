@@ -136,11 +136,19 @@ export function mapChat(
     currentUserId?: string;
   },
 ): MappedChat {
+  const peer =
+    chat.chatType === 'private' && opts?.currentUserId && chat.members?.length
+      ? chat.members.find((m) => m.userId !== opts.currentUserId)
+      : undefined;
+
   const base: MappedChat = {
     id: chat.id,
     chat_type: chat.chatType,
     name: chat.name ?? null,
-    avatar_url: chat.avatarUrl ?? null,
+    avatar_url:
+      chat.chatType === 'private'
+        ? peer?.user?.avatarUrl ?? null
+        : chat.avatarUrl ?? null,
     peer_display_name: null,
     created_by_id: chat.createdById,
     last_message_id: chat.lastMessageId ?? null,
@@ -160,7 +168,6 @@ export function mapChat(
     opts?.currentUserId &&
     chat.members?.length
   ) {
-    const peer = chat.members.find((m) => m.userId !== opts.currentUserId);
     base.peer_display_name =
       peer?.user?.displayName ??
       peer?.user?.username ??

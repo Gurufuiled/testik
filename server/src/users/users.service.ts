@@ -22,6 +22,16 @@ export class UsersService {
     return mapUser(user);
   }
 
+  async getUserById(userId: string): Promise<MappedUser> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    return mapUser(user);
+  }
+
   async searchUsers(
     currentUserId: string,
     query: string,
