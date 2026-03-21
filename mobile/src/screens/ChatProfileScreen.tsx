@@ -1,9 +1,13 @@
-import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import Feather from 'expo/node_modules/@expo/vector-icons/Feather';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
+  Dimensions,
+  GestureResponderEvent,
   Image,
+  Linking,
   Modal,
   Pressable,
   ScrollView,
@@ -11,12 +15,16 @@ import {
   StyleSheet,
   Text,
   View,
+  type ViewStyle,
 } from 'react-native';
-import { useRoute, type RouteProp } from '@react-navigation/native';
+import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useVoicePlayer } from '../contexts/VoicePlayerContext';
 import { resolveAvatarUrl } from '../config';
 import type { ChatsStackParamList } from '../navigation/types';
 import type { ApiUser } from '../services/AuthService';
 import { getUserProfile } from '../services/profileService';
+import { buildUiWaveform } from '../services/waveformUtils';
 import { chatStore } from '../stores/chatStore';
 import { messageStore } from '../stores/messageStore';
 import { uiStore } from '../stores/uiStore';
@@ -24,6 +32,7 @@ import type { Message } from '../stores/types';
 import { colors } from '../theme/colors';
 
 type ChatProfileRoute = RouteProp<ChatsStackParamList, 'ChatProfile'>;
+type ChatProfileNavigation = NativeStackNavigationProp<ChatsStackParamList, 'ChatProfile'>;
 type ProfileTabKey = 'media' | 'files' | 'voice' | 'links';
 
 type MediaTile = {
@@ -32,11 +41,27 @@ type MediaTile = {
   durationMs?: number;
 };
 
-type ListItem = {
+type FileItem = {
   id: string;
   title: string;
   subtitle: string;
-  icon: React.ComponentProps<typeof Feather>['name'];
+  uri: string | null;
+  extension: string;
+};
+
+type VoiceItem = {
+  id: string;
+  uri: string | null;
+  durationMs: number;
+  waveform: number[];
+  dateLabel: string;
+};
+
+type LinkItem = {
+  id: string;
+  title: string;
+  subtitle: string;
+  uri: string;
 };
 
 type InfoRow = {
@@ -45,6 +70,12 @@ type InfoRow = {
   value: string;
   icon?: React.ComponentProps<typeof Feather>['name'];
 };
+
+type ProfileActionMenuState = {
+  messageId: string;
+  top: number;
+  left: number;
+} | null;
 
 const AVATAR_COLORS = [
   '#5B8DEF',
@@ -63,6 +94,7 @@ const TAB_LABELS: Record<ProfileTabKey, string> = {
   voice: 'Голосовые',
   links: 'Ссылки',
 };
+const PROFILE_SCREEN_WIDTH = Dimensions.get('window').width;
 
 function getAvatarColor(seed: string) {
   let hash = 0;
@@ -166,6 +198,20 @@ function buildInfoRows(profile: ApiUser | null): InfoRow[] {
   return rows;
 }
 
+function getFileExtension(fileName: string) {
+  const ext = fileName.split('.').pop()?.trim() ?? '';
+  if (!ext || ext === fileName) return 'FILE';
+  return ext.slice(0, 4).toUpperCase();
+}
+
+function buildVoicePreviewBars(waveform: number[]) {
+  const base =
+    waveform.length > 0
+      ? buildUiWaveform(waveform, 28)
+      : buildUiWaveform([0.22, 0.34, 0.58, 0.41, 0.27, 0.49, 0.31], 28);
+  return base.map((value) => 4 + Math.pow(value, 1.15) * 16);
+}
+
 type QuickActionButtonProps = {
   icon: React.ComponentProps<typeof Feather>['name'];
   label: string;
@@ -194,7 +240,169 @@ function QuickActionButton({
   );
 }
 
+function FileRow({
+  item,
+  onOpenMenu,
+}: {
+  item: FileItem;
+  onOpenMenu: (messageId: string, event: GestureResponderEvent) => void;
+}) {
+  const handlePress = () => {
+    if (!item.uri) {
+      Alert.alert('Файл недоступен', 'У этого файла пока нет ссылки для открытия.');
+      return;
+    }
+    void Linking.openURL(item.uri).catch(() => {
+      Alert.alert('Не удалось открыть файл', 'Проверь ссылку или попробуй позже.');
+    });
+  };
+
+  return (
+    <Pressable
+      onPress={handlePress}
+      onLongPress={(event) => onOpenMenu(item.id, event)}
+      delayLongPress={220}
+      style={({ pressed }) => [styles.fileRow, pressed && styles.fileRowPressed]}
+    >
+      <View style={styles.fileBadge}>
+        <Text style={styles.fileBadgeText}>{item.extension}</Text>
+      </View>
+      <View style={styles.fileTextWrap}>
+        <Text style={styles.fileTitle} numberOfLines={1}>
+          {item.title}
+        </Text>
+        <Text style={styles.fileSubtitle} numberOfLines={1}>
+          {item.subtitle}
+        </Text>
+      </View>
+      <Feather name="chevron-right" size={18} color="#A6AFBC" />
+    </Pressable>
+  );
+}
+
+function VoiceRow({
+  item,
+  onOpenMenu,
+}: {
+  item: VoiceItem;
+  onOpenMenu: (messageId: string, event: GestureResponderEvent) => void;
+}) {
+  const { play, pause, currentVoiceUri, status } = useVoicePlayer();
+  const isCurrent = currentVoiceUri === item.uri;
+  const isPlaying = isCurrent && status.isPlaying;
+  const bars = useMemo(() => buildVoicePreviewBars(item.waveform), [item.waveform]);
+  const progress =
+    isCurrent && status.durationMs > 0 ? status.positionMs / status.durationMs : 0;
+  const effectiveDurationMs =
+    isCurrent && item.durationMs > 0
+      ? Math.max(item.durationMs - status.positionMs, 0)
+      : item.durationMs;
+
+  const handlePlayPress = async () => {
+    if (!item.uri) {
+      Alert.alert('Голосовое недоступно', 'У этого сообщения пока нет ссылки для воспроизведения.');
+      return;
+    }
+    try {
+      if (isPlaying) {
+        await pause();
+      } else {
+        await play(item.uri);
+      }
+    } catch {
+      Alert.alert('Не удалось воспроизвести', 'Попробуй еще раз чуть позже.');
+    }
+  };
+
+  return (
+    <Pressable
+      onLongPress={(event) => onOpenMenu(item.id, event)}
+      delayLongPress={220}
+      style={styles.voiceRow}
+    >
+      <Pressable
+        onPress={() => {
+          void handlePlayPress();
+        }}
+        style={({ pressed }) => [
+          styles.voicePlayButton,
+          isPlaying && styles.voicePlayButtonActive,
+          pressed && styles.voicePlayButtonPressed,
+        ]}
+      >
+        <Feather
+          name={isPlaying ? 'pause' : 'play'}
+          size={16}
+          color="#FFFFFF"
+          style={!isPlaying ? styles.voicePlayIcon : undefined}
+        />
+      </Pressable>
+
+      <View style={styles.voiceWaveWrap}>
+        <View style={styles.voiceWaveTrack}>
+          {bars.map((height, index) => {
+            const isFilled = progress > 0 && index / bars.length <= progress;
+            return (
+              <View
+                key={`${item.id}-${index}`}
+                style={[
+                  styles.voiceBar,
+                  {
+                    height,
+                    backgroundColor: isFilled ? colors.accent : 'rgba(77,141,255,0.24)',
+                  },
+                ]}
+              />
+            );
+          })}
+        </View>
+        <View style={styles.voiceMetaRow}>
+          <Text style={styles.voiceDuration}>{formatDuration(effectiveDurationMs)}</Text>
+          <Text style={styles.voiceDate}>{item.dateLabel}</Text>
+        </View>
+      </View>
+    </Pressable>
+  );
+}
+
+function LinkRow({
+  item,
+  onOpenMenu,
+}: {
+  item: LinkItem;
+  onOpenMenu: (messageId: string, event: GestureResponderEvent) => void;
+}) {
+  const handlePress = () => {
+    void Linking.openURL(item.uri).catch(() => {
+      Alert.alert('Не удалось открыть ссылку', 'Попробуй еще раз чуть позже.');
+    });
+  };
+
+  return (
+    <Pressable
+      onPress={handlePress}
+      onLongPress={(event) => onOpenMenu(item.id.split('-')[0] ?? item.id, event)}
+      delayLongPress={220}
+      style={({ pressed }) => [styles.linkRow, pressed && styles.linkRowPressed]}
+    >
+      <View style={styles.linkIconWrap}>
+        <Feather name="link" size={17} color={colors.accent} />
+      </View>
+      <View style={styles.linkTextWrap}>
+        <Text style={styles.linkTitle} numberOfLines={1}>
+          {item.title}
+        </Text>
+        <Text style={styles.linkSubtitle} numberOfLines={1}>
+          {item.subtitle}
+        </Text>
+      </View>
+      <Feather name="external-link" size={16} color="#A6AFBC" />
+    </Pressable>
+  );
+}
+
 export function ChatProfileScreen() {
+  const navigation = useNavigation<ChatProfileNavigation>();
   const route = useRoute<ChatProfileRoute>();
   const { chatId, userId, chatTitle } = route.params;
   const [profile, setProfile] = useState<ApiUser | null>(null);
@@ -202,6 +410,8 @@ export function ChatProfileScreen() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ProfileTabKey>('media');
   const [selectedMediaUri, setSelectedMediaUri] = useState<string | null>(null);
+  const [actionMenu, setActionMenu] = useState<ProfileActionMenuState>(null);
+  const actionMenuAnimation = useRef(new Animated.Value(0)).current;
 
   const chats = useSyncExternalStore(
     (onStoreChange) => chatStore.subscribe(onStoreChange),
@@ -276,7 +486,7 @@ export function ChatProfileScreen() {
     [chatMessages]
   );
 
-  const fileItems = useMemo<ListItem[]>(
+  const fileItems = useMemo<FileItem[]>(
     () =>
       chatMessages
         .filter((message) => !message.is_deleted && message.msg_type === 'file')
@@ -284,32 +494,34 @@ export function ChatProfileScreen() {
           id: message.id,
           title: message.media?.[0]?.file_name || 'Файл',
           subtitle: buildFileSubtitle(message),
-          icon: 'file-text',
+          uri: extractMediaUri(message),
+          extension: getFileExtension(message.media?.[0]?.file_name || 'FILE'),
         })),
     [chatMessages]
   );
 
-  const voiceItems = useMemo<ListItem[]>(
+  const voiceItems = useMemo<VoiceItem[]>(
     () =>
       chatMessages
         .filter((message) => !message.is_deleted && message.msg_type === 'voice')
-        .map((message, index) => ({
+        .map((message) => ({
           id: message.id,
-          title: `Голосовое #${index + 1}`,
-          subtitle: buildVoiceSubtitle(message),
-          icon: 'mic',
+          uri: extractMediaUri(message),
+          durationMs: message.media?.[0]?.duration_ms ?? 0,
+          waveform: message.media?.[0]?.waveform ?? [],
+          dateLabel: formatMessageDate(message.created_at),
         })),
     [chatMessages]
   );
 
-  const linkItems = useMemo<ListItem[]>(
+  const linkItems = useMemo<LinkItem[]>(
     () =>
       chatMessages.flatMap((message) =>
         extractLinks(message.content).map((link, index) => ({
           id: `${message.id}-${index}`,
           title: link.replace(/^https?:\/\//, ''),
           subtitle: formatMessageDate(message.created_at),
-          icon: 'link',
+          uri: link,
         }))
       ),
     [chatMessages]
@@ -337,10 +549,6 @@ export function ChatProfileScreen() {
     );
   };
 
-  const handleMediaPress = () => {
-    setActiveTab('media');
-  };
-
   const handleMutePress = () => {
     if (!chat) return;
     chatStore.getState().updateChat({
@@ -354,6 +562,89 @@ export function ChatProfileScreen() {
       'Скоро здесь',
       'В этот раздел можно вынести действия вроде "Заблокировать", "Очистить историю" и "Удалить чат".'
     );
+  };
+
+  const closeActionMenu = useCallback(
+    (onClosed?: () => void) => {
+      if (!actionMenu) {
+        onClosed?.();
+        return;
+      }
+
+      Animated.timing(actionMenuAnimation, {
+        toValue: 0,
+        duration: 120,
+        useNativeDriver: true,
+      }).start(() => {
+        setActionMenu(null);
+        onClosed?.();
+      });
+    },
+    [actionMenu, actionMenuAnimation]
+  );
+
+  const handleShowInChat = (messageId: string) => {
+    closeActionMenu(() => {
+      navigation.navigate('Chat', {
+        chatId,
+        chatTitle,
+        focusMessageId: messageId,
+      });
+    });
+  };
+
+  const openActionMenu = (messageId: string, event: GestureResponderEvent) => {
+    const menuWidth = 176;
+    const estimatedHeight = 44;
+    const sideGap = 12;
+    const left = Math.max(
+      sideGap,
+      Math.min(
+        event.nativeEvent.pageX - menuWidth / 2,
+        PROFILE_SCREEN_WIDTH - menuWidth - sideGap
+      )
+    );
+    const top = Math.max(92, event.nativeEvent.pageY - estimatedHeight - 14);
+    actionMenuAnimation.setValue(0);
+    setActionMenu({
+      messageId,
+      top,
+      left,
+    });
+  };
+
+  useEffect(() => {
+    if (!actionMenu) return;
+
+    Animated.spring(actionMenuAnimation, {
+      toValue: 1,
+      damping: 18,
+      mass: 0.8,
+      stiffness: 240,
+      useNativeDriver: true,
+    }).start();
+  }, [actionMenu, actionMenuAnimation]);
+
+  const actionMenuBackdropOpacity = actionMenuAnimation.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 1],
+  });
+  const actionMenuCardStyle: Animated.WithAnimatedObject<ViewStyle> = {
+    opacity: actionMenuAnimation,
+    transform: [
+      {
+        translateY: actionMenuAnimation.interpolate({
+          inputRange: [0, 1],
+          outputRange: [10, 0],
+        }),
+      },
+      {
+        scale: actionMenuAnimation.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0.96, 1],
+        }),
+      },
+    ],
   };
 
   const renderTabContent = () => {
@@ -375,6 +666,8 @@ export function ChatProfileScreen() {
             <Pressable
               key={item.id}
               onPress={() => setSelectedMediaUri(item.uri)}
+              onLongPress={(event) => openActionMenu(item.id, event)}
+              delayLongPress={220}
               style={({ pressed }) => [styles.mediaTile, pressed && styles.mediaTilePressed]}
             >
               <Image source={{ uri: item.uri }} style={styles.mediaImage} />
@@ -389,47 +682,63 @@ export function ChatProfileScreen() {
       );
     }
 
-    const currentItems =
-      activeTab === 'files'
-        ? fileItems
-        : activeTab === 'voice'
-          ? voiceItems
-          : linkItems;
+    if (activeTab === 'files') {
+      if (fileItems.length === 0) {
+        return (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>Пока нет файлов</Text>
+            <Text style={styles.emptySubtitle}>
+              Документы и вложения из этого чата будут появляться здесь.
+            </Text>
+          </View>
+        );
+      }
 
-    if (currentItems.length === 0) {
+      return (
+        <View style={styles.stackSection}>
+          {fileItems.map((item) => (
+            <FileRow key={item.id} item={item} onOpenMenu={openActionMenu} />
+          ))}
+        </View>
+      );
+    }
+
+    if (activeTab === 'voice') {
+      if (voiceItems.length === 0) {
+        return (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>Пока нет голосовых</Text>
+            <Text style={styles.emptySubtitle}>
+              Здесь будут собраны все голосовые сообщения из этого диалога.
+            </Text>
+          </View>
+        );
+      }
+
+      return (
+        <View style={styles.stackSection}>
+          {voiceItems.map((item) => (
+            <VoiceRow key={item.id} item={item} onOpenMenu={openActionMenu} />
+          ))}
+        </View>
+      );
+    }
+
+    if (linkItems.length === 0) {
       return (
         <View style={styles.emptyState}>
-          <Text style={styles.emptyTitle}>Пока пусто</Text>
+          <Text style={styles.emptyTitle}>Пока нет ссылок</Text>
           <Text style={styles.emptySubtitle}>
-            Эта вкладка заполнится по мере активности в чате.
+            Ссылки из переписки появятся на этой вкладке автоматически.
           </Text>
         </View>
       );
     }
 
     return (
-      <View style={styles.listSection}>
-        {currentItems.map((item, index) => (
-          <Pressable
-            key={item.id}
-            style={({ pressed }) => [
-              styles.listRow,
-              index !== currentItems.length - 1 && styles.listRowWithBorder,
-              pressed && styles.listRowPressed,
-            ]}
-          >
-            <View style={styles.listIconWrap}>
-              <Feather name={item.icon} size={18} color={colors.accent} />
-            </View>
-            <View style={styles.listTextWrap}>
-              <Text style={styles.listTitle} numberOfLines={1}>
-                {item.title}
-              </Text>
-              <Text style={styles.listSubtitle} numberOfLines={1}>
-                {item.subtitle}
-              </Text>
-            </View>
-          </Pressable>
+      <View style={styles.stackSection}>
+        {linkItems.map((item) => (
+          <LinkRow key={item.id} item={item} onOpenMenu={openActionMenu} />
         ))}
       </View>
     );
@@ -552,6 +861,39 @@ export function ChatProfileScreen() {
           </View>
         </Pressable>
       </Modal>
+
+      {actionMenu ? (
+        <View style={styles.actionMenuRoot} pointerEvents="box-none">
+          <Animated.View
+            style={[
+              styles.actionMenuBackdrop,
+              {
+                opacity: actionMenuBackdropOpacity,
+              },
+            ]}
+          >
+            <Pressable style={styles.actionMenuBackdropPressable} onPress={() => closeActionMenu()} />
+          </Animated.View>
+          <Animated.View
+            style={[
+              styles.actionMenuCard,
+              {
+                top: actionMenu.top,
+                left: actionMenu.left,
+              },
+              actionMenuCardStyle,
+            ]}
+          >
+            <Pressable
+              onPress={() => handleShowInChat(actionMenu.messageId)}
+              style={({ pressed }) => [styles.actionMenuItem, pressed && styles.actionMenuItemPressed]}
+            >
+              <Feather name="message-circle" size={16} color="#111827" />
+              <Text style={styles.actionMenuLabel}>Показать в чате</Text>
+            </Pressable>
+          </Animated.View>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -799,40 +1141,137 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#FFFFFF',
   },
-  listSection: {
+  stackSection: {
     paddingHorizontal: 14,
     paddingTop: 4,
+    gap: 10,
   },
-  listRow: {
+  fileRow: {
+    minHeight: 72,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 14,
+    backgroundColor: '#F7F9FD',
   },
-  listRowWithBorder: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#E1E6EF',
-  },
-  listRowPressed: {
+  fileRowPressed: {
     opacity: 0.82,
   },
-  listIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
+  fileBadge: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(77,141,255,0.14)',
+    marginRight: 12,
+  },
+  fileBadgeText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.accent,
+  },
+  fileTextWrap: {
+    flex: 1,
+    paddingRight: 10,
+  },
+  fileTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.textPrimary,
+  },
+  fileSubtitle: {
+    marginTop: 3,
+    fontSize: 13,
+    color: colors.textSecondary,
+  },
+  voiceRow: {
+    minHeight: 76,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F7F9FD',
+  },
+  voicePlayButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.accent,
+    marginRight: 12,
+  },
+  voicePlayButtonActive: {
+    backgroundColor: '#4C84E8',
+  },
+  voicePlayButtonPressed: {
+    opacity: 0.84,
+  },
+  voicePlayIcon: {
+    marginLeft: 2,
+  },
+  voiceWaveWrap: {
+    flex: 1,
+  },
+  voiceWaveTrack: {
+    height: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  voiceBar: {
+    width: 3,
+    borderRadius: 999,
+  },
+  voiceMetaRow: {
+    marginTop: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  voiceDuration: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  voiceDate: {
+    fontSize: 13,
+    color: colors.textSecondary,
+  },
+  linkRow: {
+    minHeight: 72,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F7F9FD',
+  },
+  linkRowPressed: {
+    opacity: 0.82,
+  },
+  linkIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(77,141,255,0.12)',
     marginRight: 12,
   },
-  listTextWrap: {
+  linkTextWrap: {
     flex: 1,
+    paddingRight: 10,
   },
-  listTitle: {
+  linkTitle: {
     fontSize: 15,
     fontWeight: '600',
     color: colors.textPrimary,
   },
-  listSubtitle: {
+  linkSubtitle: {
     marginTop: 3,
     fontSize: 13,
     color: colors.textSecondary,
@@ -881,5 +1320,44 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.16)',
+  },
+  actionMenuRoot: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 20,
+    elevation: 20,
+  },
+  actionMenuBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15, 23, 42, 0.04)',
+  },
+  actionMenuBackdropPressable: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  actionMenuCard: {
+    position: 'absolute',
+    minWidth: 164,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.14,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 10,
+    overflow: 'hidden',
+  },
+  actionMenuItem: {
+    minHeight: 40,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  actionMenuItemPressed: {
+    backgroundColor: 'rgba(77,141,255,0.08)',
+  },
+  actionMenuLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#111827',
   },
 });

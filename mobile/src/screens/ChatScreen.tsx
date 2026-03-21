@@ -19,7 +19,8 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useRoute, RouteProp } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
 import type { ChatsStackParamList } from '../navigation/types';
 import { authStore } from '../stores/authStore';
@@ -39,6 +40,7 @@ import {
 import type { Message } from '../stores/types';
 
 type ChatRoute = RouteProp<ChatsStackParamList, 'Chat'>;
+type ChatNavigation = NativeStackNavigationProp<ChatsStackParamList, 'Chat'>;
 type MessageMenuActionKey = 'reply' | 'copy' | 'pin' | 'forward' | 'delete' | 'select';
 
 type MenuState = {
@@ -136,8 +138,9 @@ function ChatBackgroundPattern() {
 }
 
 export function ChatScreen() {
+  const navigation = useNavigation<ChatNavigation>();
   const route = useRoute<ChatRoute>();
-  const { chatId } = route.params;
+  const { chatId, focusMessageId } = route.params;
   const currentUserId = authStore((s) => s.user?.id ?? null);
   const listRef = useRef<FlatList<Message> | null>(null);
   const blurTargetRef = useRef<View | null>(null);
@@ -147,9 +150,11 @@ export function ChatScreen() {
   const [menuState, setMenuState] = useState<MenuState>(null);
   const [selectedMessageIds, setSelectedMessageIds] = useState<string[]>([]);
   const [forwardSourceMessageId, setForwardSourceMessageId] = useState<string | null>(null);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const menuAnim = useRef(new Animated.Value(0)).current;
-  const messageContentRefs = useRef<Record<string, View | null>>({});
+  const messageContentRefs = useRef<Record<string, View | null>>({});  
   const swipeableRefs = useRef<Record<string, Swipeable | null>>({});
+  const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const messages = useSyncExternalStore(
     (onStoreChange) => messageStore.subscribe(onStoreChange),
@@ -228,16 +233,22 @@ export function ChatScreen() {
     setReplyToMessageId(null);
   }, []);
 
-  const handlePinnedBannerPress = useCallback(() => {
-    if (!pinnedMessageId) return;
+  useEffect(() => {
+    return () => {
+      if (highlightTimeoutRef.current) {
+        clearTimeout(highlightTimeoutRef.current);
+      }
+    };
+  }, []);
 
-    const targetIndex = messages.findIndex((message) => message.id === pinnedMessageId);
+  const scrollToMessageId = useCallback((messageId: string, missingMessageTitle?: string) => {
+    const targetIndex = messages.findIndex((message) => message.id === messageId);
     if (targetIndex < 0) {
       Alert.alert(
-        'Сообщение не найдено',
-        'Закрепленное сообщение пока не загружено в этот экран.'
+        missingMessageTitle ?? 'Сообщение не найдено',
+        'Нужное сообщение пока не загружено в этот экран.'
       );
-      return;
+      return false;
     }
 
     requestAnimationFrame(() => {
@@ -247,7 +258,32 @@ export function ChatScreen() {
         viewPosition: 0.45,
       });
     });
-  }, [messages, pinnedMessageId]);
+
+    setHighlightedMessageId(messageId);
+    if (highlightTimeoutRef.current) {
+      clearTimeout(highlightTimeoutRef.current);
+    }
+    highlightTimeoutRef.current = setTimeout(() => {
+      setHighlightedMessageId(null);
+      highlightTimeoutRef.current = null;
+    }, 1800);
+
+    return true;
+  }, [messages]);
+
+  const handlePinnedBannerPress = useCallback(() => {
+    if (!pinnedMessageId) return;
+    scrollToMessageId(pinnedMessageId, 'Сообщение не найдено');
+  }, [pinnedMessageId, scrollToMessageId]);
+
+  useEffect(() => {
+    if (!focusMessageId) return;
+
+    const didScroll = scrollToMessageId(focusMessageId, 'Сообщение недоступно');
+    if (didScroll) {
+      navigation.setParams({ focusMessageId: undefined });
+    }
+  }, [focusMessageId, navigation, scrollToMessageId]);
 
   const handleScrollToIndexFailed = useCallback(
     (info: { index: number; averageItemLength: number }) => {
@@ -759,19 +795,23 @@ export function ChatScreen() {
   const renderMessageCard = useCallback((item: Message) => {
     const isMe = item.sender_id === currentUserId;
     const isSelected = selectedMessageIds.includes(item.id);
+    const isHighlighted = highlightedMessageId === item.id;
 
     return (
       <View style={[styles.messageWrap, isMe ? styles.messageWrapMe : styles.messageWrapOther]}>
         <View
           ref={(node) => setMessageContentRef(item.id, node)}
           collapsable={false}
-          style={styles.messageContentMeasure}
+          style={[
+            styles.messageContentMeasure,
+            isHighlighted && styles.messageContentHighlighted,
+          ]}
         >
           {renderMessageBody(item, isSelected)}
         </View>
       </View>
     );
-  }, [currentUserId, renderMessageBody, selectedMessageIds, setMessageContentRef]);
+  }, [currentUserId, highlightedMessageId, renderMessageBody, selectedMessageIds, setMessageContentRef]);
 
   const menuActions = useMemo<MenuAction[]>(() => {
     if (!activeMenuMessage) return [];
@@ -1183,6 +1223,14 @@ const styles = StyleSheet.create({
   },
   messageContentMeasure: {
     flexShrink: 1,
+  },
+  messageContentHighlighted: {
+    borderRadius: 22,
+    shadowColor: '#F59E0B',
+    shadowOpacity: 0.28,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 8,
   },
   bubble: {
     paddingHorizontal: 10,
