@@ -5,6 +5,7 @@ import {
   Alert,
   Animated,
   Dimensions,
+  Easing,
   GestureResponderEvent,
   Image,
   Linking,
@@ -15,10 +16,12 @@ import {
   StyleSheet,
   Text,
   View,
+  type ImageStyle,
   type ViewStyle,
 } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { ChatDao } from '../db';
 import { useVoicePlayer } from '../contexts/VoicePlayerContext';
 import { resolveAvatarUrl } from '../config';
 import type { ChatsStackParamList } from '../navigation/types';
@@ -411,7 +414,10 @@ export function ChatProfileScreen() {
   const [activeTab, setActiveTab] = useState<ProfileTabKey>('media');
   const [selectedMediaUri, setSelectedMediaUri] = useState<string | null>(null);
   const [actionMenu, setActionMenu] = useState<ProfileActionMenuState>(null);
+  const [isHeroExpanded, setIsHeroExpanded] = useState(false);
+  const [isMoreMenuVisible, setIsMoreMenuVisible] = useState(false);
   const actionMenuAnimation = useRef(new Animated.Value(0)).current;
+  const heroAnimation = useRef(new Animated.Value(0)).current;
 
   const chats = useSyncExternalStore(
     (onStoreChange) => chatStore.subscribe(onStoreChange),
@@ -424,6 +430,7 @@ export function ChatProfileScreen() {
     () => ({})
   );
   const livePresence = uiStore((s) => s.presenceByUserId[userId]);
+  const isBlocked = uiStore((s) => Boolean(s.blockedUserIds[userId]));
 
   const chat = chats.find((item) => item.id === chatId) ?? null;
   const chatMessages = messagesByChatId[chatId] ?? [];
@@ -451,6 +458,21 @@ export function ChatProfileScreen() {
     };
   }, [userId]);
 
+  useEffect(() => {
+    void uiStore.getState().hydrateBlockedUsers();
+  }, []);
+
+  useEffect(() => {
+    heroAnimation.stopAnimation();
+    Animated.timing(heroAnimation, {
+      toValue: isHeroExpanded ? 1 : 0,
+      duration: isHeroExpanded ? 320 : 260,
+      easing: Easing.bezier(0.22, 1, 0.36, 1),
+      useNativeDriver: false,
+      isInteraction: false,
+    }).start();
+  }, [heroAnimation, isHeroExpanded]);
+
   const displayName = buildDisplayName(
     profile,
     chatTitle ?? chat?.peer_display_name ?? chat?.name ?? ''
@@ -465,6 +487,52 @@ export function ChatProfileScreen() {
   const initial = (displayName.trim()[0] || '?').toUpperCase();
   const isMuted = (chat?.is_muted ?? 0) === 1;
   const infoRows = useMemo(() => buildInfoRows(profile), [profile]);
+  const expandedHeroWidth = PROFILE_SCREEN_WIDTH;
+  const expandedHeroHeight = Math.min(Math.max(PROFILE_SCREEN_WIDTH * 0.92, 280), 360);
+  const heroCardStyle: Animated.WithAnimatedObject<ViewStyle> = {
+    paddingTop: heroAnimation.interpolate({
+      inputRange: [0, 1],
+      outputRange: [24, 0],
+    }),
+    paddingBottom: heroAnimation.interpolate({
+      inputRange: [0, 1],
+      outputRange: [18, 24],
+    }),
+  };
+  const heroAvatarStyle: Animated.WithAnimatedObject<ImageStyle> = {
+    width: heroAnimation.interpolate({
+      inputRange: [0, 1],
+      outputRange: [108, expandedHeroWidth],
+    }),
+    height: heroAnimation.interpolate({
+      inputRange: [0, 1],
+      outputRange: [108, expandedHeroHeight],
+    }),
+    borderRadius: heroAnimation.interpolate({
+      inputRange: [0, 1],
+      outputRange: [54, 0],
+    }),
+    marginBottom: heroAnimation.interpolate({
+      inputRange: [0, 1],
+      outputRange: [14, 18],
+    }),
+    borderWidth: heroAnimation.interpolate({
+      inputRange: [0, 1],
+      outputRange: [3, 0],
+    }),
+  };
+  const heroContentStyle: Animated.WithAnimatedObject<ViewStyle> = {
+    paddingHorizontal: heroAnimation.interpolate({
+      inputRange: [0, 1],
+      outputRange: [16, 18],
+    }),
+  };
+  const heroActionsStyle: Animated.WithAnimatedObject<ViewStyle> = {
+    marginTop: heroAnimation.interpolate({
+      inputRange: [0, 1],
+      outputRange: [20, 16],
+    }),
+  };
 
   const mediaItems = useMemo<MediaTile[]>(
     () =>
@@ -557,11 +625,80 @@ export function ChatProfileScreen() {
     });
   };
 
-  const handleMorePress = () => {
+  const handleMorePressLegacy = () => {
     Alert.alert(
       'Скоро здесь',
       'В этот раздел можно вынести действия вроде "Заблокировать", "Очистить историю" и "Удалить чат".'
     );
+  };
+
+  const handleMorePress = () => {
+    setIsMoreMenuVisible(true);
+  };
+
+  const closeMoreMenu = () => {
+    setIsMoreMenuVisible(false);
+  };
+
+  const handleToggleBlocked = () => {
+    closeMoreMenu();
+    const nextBlocked = !isBlocked;
+    uiStore.getState().setUserBlocked(userId, nextBlocked);
+    Alert.alert(
+      nextBlocked ? 'Пользователь заблокирован' : 'Пользователь разблокирован',
+      nextBlocked
+        ? `Локально заблокировали ${displayName}. Это состояние пока работает только на этом устройстве.`
+        : `${displayName} снова доступен на этом устройстве.`
+    );
+  };
+
+  const deleteChatLocally = useCallback(async () => {
+    try {
+      await new ChatDao().delete(chatId);
+      messageStore.getState().clearMessages(chatId);
+      chatStore.getState().removeChat(chatId);
+      navigation.navigate('ChatList');
+    } catch {
+      Alert.alert('Не удалось удалить чат', 'Попробуй еще раз чуть позже.');
+    }
+  }, [chatId, navigation]);
+
+  const handleDeleteChatPress = () => {
+    closeMoreMenu();
+    Alert.alert('Удалить чат?', 'Выбери, как удалить этот диалог.', [
+      { text: 'Отмена', style: 'cancel' },
+      {
+        text: `Удалить у меня и у ${displayName}`,
+        style: 'destructive',
+        onPress: () => {
+          Alert.alert(
+            'Пока недоступно',
+            'Этот вариант потребует отдельного серверного удаления чата для обоих участников. Сейчас можно удалить чат только локально у себя.'
+          );
+        },
+      },
+      {
+        text: 'Удалить у меня',
+        style: 'destructive',
+        onPress: () => {
+          Alert.alert('Удалить только у тебя?', 'Чат исчезнет только на этом устройстве.', [
+            { text: 'Отмена', style: 'cancel' },
+            {
+              text: 'Удалить',
+              style: 'destructive',
+              onPress: () => {
+                void deleteChatLocally();
+              },
+            },
+          ]);
+        },
+      },
+    ]);
+  };
+
+  const toggleHeroExpanded = () => {
+    if (!avatarUrl) return;
+    setIsHeroExpanded((current) => !current);
   };
 
   const closeActionMenu = useCallback(
@@ -749,21 +886,36 @@ export function ChatProfileScreen() {
       <StatusBar barStyle="dark-content" />
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        <View style={styles.heroCard}>
-          <View style={styles.heroGlow} />
-          {avatarUrl ? (
-            <Image source={{ uri: avatarUrl }} style={styles.avatar} />
-          ) : (
-            <View style={[styles.avatarFallback, { backgroundColor: avatarColor }]}>
-              <Text style={styles.avatarFallbackText}>{initial}</Text>
-            </View>
-          )}
+        <Animated.View style={[styles.heroCard, heroCardStyle]}>
+          <Pressable
+            onPress={toggleHeroExpanded}
+            disabled={!avatarUrl}
+            style={({ pressed }) => [
+              styles.avatarPressable,
+              pressed && avatarUrl ? styles.avatarPressablePressed : null,
+            ]}
+          >
+            {avatarUrl ? (
+              <Animated.Image source={{ uri: avatarUrl }} style={[styles.avatar, heroAvatarStyle]} />
+            ) : (
+              <Animated.View
+                style={[
+                  styles.avatarFallback,
+                  heroAvatarStyle,
+                  { backgroundColor: avatarColor },
+                ]}
+              >
+                <Text style={styles.avatarFallbackText}>{initial}</Text>
+              </Animated.View>
+            )}
+          </Pressable>
 
-          <Text style={styles.name}>{displayName}</Text>
-          <Text style={styles.status}>{statusLabel}</Text>
-          {handleLabel ? <Text style={styles.handle}>{handleLabel}</Text> : null}
+          <Animated.View style={[styles.heroContent, heroContentStyle]}>
+            <Text style={styles.name}>{displayName}</Text>
+            <Text style={styles.status}>{statusLabel}</Text>
+            {handleLabel ? <Text style={styles.handle}>{handleLabel}</Text> : null}
 
-          <View style={styles.quickActionsRow}>
+            <Animated.View style={[styles.quickActionsRow, heroActionsStyle]}>
             <QuickActionButton icon="phone" label="Звонок" onPress={handleCallPress} />
             <QuickActionButton icon="video" label="Видео" onPress={handleVideoPress} />
             <QuickActionButton
@@ -774,7 +926,7 @@ export function ChatProfileScreen() {
             />
             <QuickActionButton icon="search" label="Поиск" onPress={handleSearchPress} />
             <QuickActionButton icon="more-horizontal" label="Еще" onPress={handleMorePress} />
-          </View>
+            </Animated.View>
 
           {loading ? (
             <View style={styles.loaderRow}>
@@ -784,7 +936,8 @@ export function ChatProfileScreen() {
           ) : null}
 
           {!loading && error ? <Text style={styles.errorText}>{error}</Text> : null}
-        </View>
+          </Animated.View>
+        </Animated.View>
 
         {infoRows.length > 0 ? (
           <View style={styles.infoCard}>
@@ -839,6 +992,57 @@ export function ChatProfileScreen() {
           {renderTabContent()}
         </View>
       </ScrollView>
+
+      <Modal
+        visible={isMoreMenuVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeMoreMenu}
+      >
+        <View style={styles.moreMenuRoot}>
+          <Pressable style={styles.moreMenuBackdrop} onPress={closeMoreMenu} />
+          <View style={styles.moreMenuSheet}>
+            <View style={styles.moreMenuHandle} />
+
+            <Pressable
+              onPress={handleToggleBlocked}
+              style={({ pressed }) => [styles.moreMenuItem, pressed && styles.moreMenuItemPressed]}
+            >
+              <View
+                style={[
+                  styles.moreMenuIconWrap,
+                  isBlocked ? styles.moreMenuIconWrapNeutral : styles.moreMenuIconWrapWarning,
+                ]}
+              >
+                <Feather
+                  name="slash"
+                  size={18}
+                  color={isBlocked ? '#64748B' : '#F97316'}
+                />
+              </View>
+              <View style={styles.moreMenuTextWrap}>
+                <Text style={styles.moreMenuLabel}>
+                  {isBlocked ? 'Разблокировать' : 'Заблокировать'}
+                </Text>
+                <Text style={styles.moreMenuCaption}>Локально на этом устройстве</Text>
+              </View>
+            </Pressable>
+
+            <Pressable
+              onPress={handleDeleteChatPress}
+              style={({ pressed }) => [styles.moreMenuItem, pressed && styles.moreMenuItemPressed]}
+            >
+              <View style={[styles.moreMenuIconWrap, styles.moreMenuIconWrapDanger]}>
+                <Feather name="trash-2" size={18} color="#EF4444" />
+              </View>
+              <View style={styles.moreMenuTextWrap}>
+                <Text style={[styles.moreMenuLabel, styles.moreMenuLabelDanger]}>Удалить чат</Text>
+                <Text style={styles.moreMenuCaption}>С выбором способа удаления</Text>
+              </View>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={selectedMediaUri != null}
@@ -910,16 +1114,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingTop: 24,
     paddingBottom: 18,
-    paddingHorizontal: 16,
     backgroundColor: '#F7F9FD',
+    overflow: 'hidden',
   },
-  heroGlow: {
-    position: 'absolute',
-    top: -70,
-    width: 260,
-    height: 220,
-    borderRadius: 130,
-    backgroundColor: 'rgba(114,168,255,0.14)',
+  avatarPressable: {
+    width: '100%',
+    alignItems: 'center',
+  },
+  avatarPressablePressed: {
+    opacity: 0.96,
   },
   avatar: {
     width: 108,
@@ -944,11 +1147,16 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#FFFFFF',
   },
+  heroContent: {
+    width: '100%',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+  },
   name: {
-    fontSize: 32,
-    lineHeight: 36,
-    fontWeight: '800',
-    color: colors.textPrimary,
+    fontSize: 24,
+    lineHeight: 28,
+    fontWeight: '700',
+    color: '#1F2937',
     textAlign: 'center',
   },
   status: {
@@ -1299,6 +1507,77 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.92)',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  moreMenuRoot: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  moreMenuBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15,23,42,0.28)',
+  },
+  moreMenuSheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingTop: 10,
+    paddingHorizontal: 16,
+    paddingBottom: 22,
+    shadowColor: '#0F172A',
+    shadowOpacity: 0.14,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: -6 },
+    elevation: 16,
+  },
+  moreMenuHandle: {
+    alignSelf: 'center',
+    width: 38,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: '#D5DCE7',
+    marginBottom: 14,
+  },
+  moreMenuItem: {
+    minHeight: 68,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingHorizontal: 4,
+  },
+  moreMenuItemPressed: {
+    opacity: 0.78,
+  },
+  moreMenuIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  moreMenuIconWrapWarning: {
+    backgroundColor: 'rgba(249, 115, 22, 0.12)',
+  },
+  moreMenuIconWrapNeutral: {
+    backgroundColor: 'rgba(100, 116, 139, 0.12)',
+  },
+  moreMenuIconWrapDanger: {
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+  },
+  moreMenuTextWrap: {
+    flex: 1,
+  },
+  moreMenuLabel: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  moreMenuLabelDanger: {
+    color: '#DC2626',
+  },
+  moreMenuCaption: {
+    marginTop: 2,
+    fontSize: 13,
+    color: '#7A8699',
   },
   viewerContent: {
     width: '100%',

@@ -16,6 +16,8 @@ type UIState = {
   presenceByUserId: Record<string, PresenceEntry>;
   pinnedMessageIdByChatId: Record<string, string | null>;
   isPinnedMessagesHydrated: boolean;
+  blockedUserIds: Record<string, true>;
+  isBlockedUsersHydrated: boolean;
 };
 
 type UIActions = {
@@ -29,10 +31,13 @@ type UIActions = {
   setPresence: (userId: string, entry: PresenceEntry) => void;
   setPinnedMessage: (chatId: string, messageId: string | null) => void;
   hydratePinnedMessages: () => Promise<void>;
+  setUserBlocked: (userId: string, blocked: boolean) => void;
+  hydrateBlockedUsers: () => Promise<void>;
 };
 
 const TYPING_STALE_MS = 5000;
 const PINNED_MESSAGES_KEY = 'ui.pinnedMessageIdByChatId';
+const BLOCKED_USERS_KEY = 'ui.blockedUserIds';
 
 const initialState: UIState = {
   connectionStatus: 'offline',
@@ -43,6 +48,8 @@ const initialState: UIState = {
   presenceByUserId: {},
   pinnedMessageIdByChatId: {},
   isPinnedMessagesHydrated: false,
+  blockedUserIds: {},
+  isBlockedUsersHydrated: false,
 };
 
 export const uiStore = create<UIState & UIActions>((set) => ({
@@ -111,6 +118,33 @@ export const uiStore = create<UIState & UIActions>((set) => ({
       });
     } catch {
       set({ isPinnedMessagesHydrated: true });
+    }
+  },
+
+  setUserBlocked: (userId, blocked) =>
+    set((s) => {
+      const next = { ...s.blockedUserIds };
+      if (blocked) {
+        next[userId] = true;
+      } else {
+        delete next[userId];
+      }
+      void SecureStore.setItemAsync(BLOCKED_USERS_KEY, JSON.stringify(next)).catch(() => {});
+      return {
+        blockedUserIds: next,
+      };
+    }),
+
+  hydrateBlockedUsers: async () => {
+    try {
+      const raw = await SecureStore.getItemAsync(BLOCKED_USERS_KEY);
+      const parsed = raw ? (JSON.parse(raw) as Record<string, true>) : {};
+      set({
+        blockedUserIds: parsed,
+        isBlockedUsersHydrated: true,
+      });
+    } catch {
+      set({ isBlockedUsersHydrated: true });
     }
   },
 }));

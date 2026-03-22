@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
+  Dimensions,
   Image,
   Modal,
   Pressable,
@@ -10,7 +11,11 @@ import {
 import { colors, bubbleRadius, typography } from '../theme/colors';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const MAX_SIZE = 240;
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const SCREEN_HEIGHT = Dimensions.get('window').height;
+const MAX_BUBBLE_WIDTH = Math.min(SCREEN_WIDTH * 0.72, 320);
+const MAX_BUBBLE_HEIGHT = Math.min(SCREEN_HEIGHT * 0.5, 380);
+const MIN_PORTRAIT_WIDTH = 154;
 
 const STATUS_ICONS: Record<string, string> = {
   sending: '\u23F1',
@@ -33,16 +38,26 @@ export interface ImageBubbleProps {
 function computeDisplaySize(
   naturalWidth: number,
   naturalHeight: number,
-  maxSize: number = MAX_SIZE
+  maxWidth: number = MAX_BUBBLE_WIDTH,
+  maxHeight: number = MAX_BUBBLE_HEIGHT
 ): { width: number; height: number } {
   if (naturalWidth <= 0 || naturalHeight <= 0) {
-    return { width: maxSize, height: maxSize };
+    return { width: maxWidth, height: maxHeight };
   }
-  const scale = Math.min(maxSize / naturalWidth, maxSize / naturalHeight, 1);
-  return {
-    width: Math.round(naturalWidth * scale),
-    height: Math.round(naturalHeight * scale),
-  };
+
+  const baseScale = Math.min(maxWidth / naturalWidth, maxHeight / naturalHeight, 1);
+  let width = Math.round(naturalWidth * baseScale);
+  let height = Math.round(naturalHeight * baseScale);
+
+  const isPortrait = naturalHeight / naturalWidth > 1.28;
+  if (isPortrait && width < MIN_PORTRAIT_WIDTH) {
+    const minWidthScale = MIN_PORTRAIT_WIDTH / naturalWidth;
+    const safeScale = Math.min(Math.max(baseScale, minWidthScale), maxHeight / naturalHeight, 1);
+    width = Math.round(naturalWidth * safeScale);
+    height = Math.round(naturalHeight * safeScale);
+  }
+
+  return { width, height };
 }
 
 export function ImageBubble({
@@ -60,7 +75,7 @@ export function ImageBubble({
 
   useEffect(() => {
     if (!uri?.trim()) {
-      setDisplaySize({ width: MAX_SIZE, height: MAX_SIZE });
+      setDisplaySize({ width: MAX_BUBBLE_WIDTH, height: MAX_BUBBLE_HEIGHT });
       return;
     }
     if (propWidth != null && propHeight != null) {
@@ -77,7 +92,7 @@ export function ImageBubble({
       },
       () => {
         if (!cancelled) {
-          setDisplaySize({ width: MAX_SIZE, height: MAX_SIZE });
+          setDisplaySize({ width: MAX_BUBBLE_WIDTH, height: MAX_BUBBLE_HEIGHT });
         }
       }
     );
@@ -94,8 +109,8 @@ export function ImageBubble({
     setFullscreenVisible(false);
   }, []);
 
-  const w = displaySize?.width ?? MAX_SIZE;
-  const h = displaySize?.height ?? MAX_SIZE;
+  const w = displaySize?.width ?? MAX_BUBBLE_WIDTH;
+  const h = displaySize?.height ?? MAX_BUBBLE_HEIGHT;
   const hasCaption = (caption ?? '').trim().length > 0;
   const statusIcon = isMe ? STATUS_ICONS[status ?? ''] ?? STATUS_ICONS.sending : null;
 
@@ -160,7 +175,7 @@ const styles = StyleSheet.create({
   container: {
     paddingHorizontal: 6,
     paddingVertical: 4,
-    maxWidth: '82%',
+    maxWidth: '100%',
     alignSelf: 'flex-start',
   },
   bubbleMe: {
@@ -177,8 +192,8 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   image: {
-    maxWidth: MAX_SIZE,
-    maxHeight: MAX_SIZE,
+    maxWidth: MAX_BUBBLE_WIDTH,
+    maxHeight: MAX_BUBBLE_HEIGHT,
   },
   overlayMeta: {
     position: 'absolute',
